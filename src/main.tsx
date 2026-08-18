@@ -6,7 +6,7 @@ import './index.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <BrowserRouter basename="/matta">
+    <BrowserRouter basename="/matta-portfolio">
       <App />
     </BrowserRouter>
   </React.StrictMode>,
