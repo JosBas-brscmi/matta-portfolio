@@ -1,0 +1,32 @@
+{
+  "name": "browave-matta-portfolio",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    
+    "dotenv": "^17.4.2",
+    "pg": "^8.23.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^7.11.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^4.7.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.6"
+  },
+  "description": "The MATTA Learning Portfolio System is the long-term training record for every Management Associate Trainee (MT) at Browave's Philippines operations. It captures onboarding, general training, departmental training, portfolio submissions, assessments, mentor feedback, and final placement decisions.",
+  "main": "index.js",
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

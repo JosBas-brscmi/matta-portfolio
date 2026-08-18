@@ -1,0 +1,11 @@
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /matta/
+
+  # Serve existing files directly
+  RewriteCond %{REQUEST_FILENAME} -f
+  RewriteRule ^ - [L]
+
+  # Fallback to built index.php for app routes
+  RewriteRule ^ index.php [L]
+</IfModule>
