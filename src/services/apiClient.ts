@@ -14,7 +14,7 @@ type FetchResult = {
 
 export const API_BASE_URL =
   import.meta.env.VITE_API_URL ??
-  'http://localhost/matta/api'
+  '/api'
 
 const NORMALIZED_API_BASE_URL =
   API_BASE_URL.replace(/\/+$/, '')
