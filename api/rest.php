@@ -21,107 +21,237 @@ $pdo = get_db();
 
 try {
     if ($method === 'GET') {
+
         $select = $_GET['select'] ?? '*';
+
+        /*
+     * ============================================================
+     * Special handling for portfolio_items -> portfolio_files
+     * ============================================================
+     *
+     * Supabase/PostgREST allowed:
+     *
+     * portfolio_files (
+     *     id,
+     *     portfolio_item_id,
+     *     ...
+     * )
+     *
+     * PostgreSQL itself does not understand that syntax.
+     *
+     * We therefore remove the nested relationship from the SQL
+     * SELECT and load portfolio_files separately.
+     */
+
+        $isPortfolioNestedSelect =
+            $table === 'portfolio_items' &&
+            stripos($select, 'portfolio_files') !== false;
+
+        $nestedFiles = [];
+
+        if ($isPortfolioNestedSelect) {
+
+            /*
+         * Remove:
+         *
+         * portfolio_files (
+         *     ...
+         * )
+         *
+         * from the SELECT string.
+         */
+
+            $selectWithoutFiles = preg_replace(
+                '/,\s*portfolio_files\s*\((.*?)\)/is',
+                '',
+                $select
+            );
+
+            if ($selectWithoutFiles === null) {
+                $selectWithoutFiles = $select;
+            }
+
+            $select = trim($selectWithoutFiles);
+
+            /*
+         * Remove any trailing commas.
+         */
+            $select = rtrim($select, " \t\n\r,");
+
+            /*
+         * If the resulting SELECT is empty, use *.
+         */
+            if ($select === '') {
+                $select = '*';
+            }
+        }
+
+        /*
+     * Basic protection against arbitrary SQL injection through
+     * the SELECT parameter.
+     *
+     * Allow normal column names, commas, whitespace and quotes.
+     */
+        if (
+            !preg_match(
+                '/^[a-zA-Z0-9_"\'\s,.*]+$/',
+                $select
+            )
+        ) {
+            http_response_code(400);
+            echo json_encode([
+                'error' => 'Invalid select parameter'
+            ]);
+            exit;
+        }
+
         $sql = "SELECT $select FROM \"public\".\"$table\"";
+
         $where = [];
         $params = [];
+
         foreach ($_GET as $k => $v) {
+
             if (strpos($k, 'eq_') === 0) {
+
                 $col = substr($k, 3);
+
                 if (preg_match('/^[a-zA-Z0-9_]+$/', $col)) {
+
                     $where[] = "\"$col\" = :$col";
                     $params[":$col"] = $v;
                 }
             }
         }
-        if ($where) $sql .= ' WHERE ' . implode(' AND ', $where);
-        if (!empty($_GET['order'])) {
-            $sql .= ' ORDER BY ' . preg_replace('/[^a-zA-Z0-9_, ]/', '', $_GET['order']);
+
+        if ($where) {
+            $sql .= ' WHERE ' . implode(' AND ', $where);
         }
+
+        if (!empty($_GET['order'])) {
+
+            $order = preg_replace(
+                '/[^a-zA-Z0-9_, ]/',
+                '',
+                $_GET['order']
+            );
+
+            if ($order !== '') {
+                $sql .= ' ORDER BY ' . $order;
+            }
+        }
+
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
+
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+
+        /*
+     * ============================================================
+     * Load portfolio_files for portfolio_items
+     * ============================================================
+     */
+
+        if ($isPortfolioNestedSelect && !empty($rows)) {
+
+            $portfolioItemIds = array_column($rows, 'id');
+
+            /*
+         * Create placeholders for the IN query.
+         */
+            $placeholders = [];
+
+            $fileParams = [];
+
+            foreach ($portfolioItemIds as $index => $itemId) {
+
+                $placeholder = ':portfolio_id_' . $index;
+
+                $placeholders[] = $placeholder;
+                $fileParams[$placeholder] = $itemId;
+            }
+
+            $fileSql = '
+            SELECT
+                id,
+                portfolio_item_id,
+                file_name,
+                file_type,
+                file_size_bytes,
+                storage_path,
+                uploaded_at
+            FROM "public"."portfolio_files"
+            WHERE portfolio_item_id IN (' .
+                implode(',', $placeholders) .
+                ')
+            ORDER BY uploaded_at
+        ';
+
+            $fileStmt = $pdo->prepare($fileSql);
+
+            foreach ($fileParams as $placeholder => $value) {
+                $fileStmt->bindValue($placeholder, $value);
+            }
+
+            $fileStmt->execute();
+
+            $files = $fileStmt->fetchAll(PDO::FETCH_ASSOC);
+
+
+            /*
+         * Group files by portfolio_item_id.
+         */
+            $filesByPortfolioItem = [];
+
+            foreach ($files as $file) {
+
+                $itemId = $file['portfolio_item_id'];
+
+                if (!isset($filesByPortfolioItem[$itemId])) {
+                    $filesByPortfolioItem[$itemId] = [];
+                }
+
+                $filesByPortfolioItem[$itemId][] = $file;
+            }
+
+
+            /*
+         * Attach nested portfolio_files to each portfolio item.
+         */
+            foreach ($rows as &$row) {
+
+                $itemId = $row['id'];
+
+                $row['portfolio_files'] =
+                    $filesByPortfolioItem[$itemId] ?? [];
+            }
+
+            unset($row);
+        }
+
+
+        /*
+     * ============================================================
+     * Return response
+     * ============================================================
+     */
+
         if (!empty($_GET['single'])) {
-            echo json_encode(['data' => $rows[0] ?? null]);
+
+            echo json_encode([
+                'data' => $rows[0] ?? null
+            ]);
         } else {
-            echo json_encode(['data' => $rows]);
+
+            echo json_encode([
+                'data' => $rows
+            ]);
         }
+
         exit;
     }
 
-    if ($method === 'POST') {
-        $body = json_decode(file_get_contents('php://input'), true);
-        if (!$body) {
-            http_response_code(400);
-            echo json_encode(['error' => 'Missing JSON body']);
-            exit;
-        }
-
-        // Ensure required uuid id exists for trainees inserts
-        if ($table === 'trainees' && empty($body['id'])) {
-            // generate 32-char hex id (Postgres accepts 32 hex digits for uuid)
-            $body['id'] = bin2hex(random_bytes(16));
-        }
-        if ($table === 'trainees' && empty($body['onboard_date'])) {
-            $body['onboard_date'] = (new DateTime('now'))->format('Y-m-d');
-        }
-        $cols = array_keys($body);
-        $colsFiltered = array_filter($cols, fn($c) => preg_match('/^[a-zA-Z0-9_]+$/', $c));
-        if (!$colsFiltered) {
-            http_response_code(400);
-            echo json_encode(['error' => 'No valid columns']);
-            exit;
-        }
-        $placeholders = array_map(fn($c) => ':' . $c, $colsFiltered);
-        $sql = 'INSERT INTO "public"."' . $table . '" ("' . implode('","', $colsFiltered) . '") VALUES (' . implode(',', $placeholders) . ') RETURNING *';
-        $stmt = $pdo->prepare($sql);
-        foreach ($colsFiltered as $c) $stmt->bindValue(':' . $c, $body[$c]);
-        $stmt->execute();
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        echo json_encode(['data' => $row]);
-        exit;
-    }
-
-    if ($method === 'PUT' || $method === 'PATCH') {
-        $id = $_GET['id'] ?? null;
-        if (!$id) {
-            http_response_code(400);
-            echo json_encode(['error' => 'Missing id']);
-            exit;
-        }
-        $body = json_decode(file_get_contents('php://input'), true);
-        $cols = array_keys($body);
-        $colsFiltered = array_filter($cols, fn($c) => preg_match('/^[a-zA-Z0-9_]+$/', $c));
-        if (!$colsFiltered) {
-            http_response_code(400);
-            echo json_encode(['error' => 'No valid columns']);
-            exit;
-        }
-        $sets = array_map(fn($c) => "\"$c\" = :$c", $colsFiltered);
-        $sql = 'UPDATE "public"."' . $table . '" SET ' . implode(',', $sets) . ' WHERE id = :__id RETURNING *';
-        $stmt = $pdo->prepare($sql);
-        foreach ($colsFiltered as $c) $stmt->bindValue(':' . $c, $body[$c]);
-        $stmt->bindValue(':__id', $id);
-        $stmt->execute();
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        echo json_encode(['data' => $row]);
-        exit;
-    }
-
-    if ($method === 'DELETE') {
-        $id = $_GET['id'] ?? null;
-        if (!$id) {
-            http_response_code(400);
-            echo json_encode(['error' => 'Missing id']);
-            exit;
-        }
-        $sql = 'DELETE FROM "public"."' . $table . '" WHERE id = :__id';
-        $stmt = $pdo->prepare($sql);
-        $stmt->bindValue(':__id', $id);
-        $stmt->execute();
-        echo json_encode(['ok' => true]);
-        exit;
-    }
 
     http_response_code(405);
     echo json_encode(['error' => 'Method not allowed']);
