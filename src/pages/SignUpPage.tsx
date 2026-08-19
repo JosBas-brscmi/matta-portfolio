@@ -112,7 +112,7 @@ export default function SignUpPage() {
       <div className="auth-pane">
         <Link to="/" className="auth-brand">
           <div className="brand-mark">
-            <img src=".\matta-logo.png" alt="MATTA" />
+            <img src="/matta-logo.png" alt="MATTA" />
           </div>
           <div className="brand-text">
             <span className="brand-text-main">MATTA</span>

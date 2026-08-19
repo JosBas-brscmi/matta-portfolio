@@ -14,7 +14,7 @@ export default function AdminShell() {
       <aside className="admin-sidebar">
         <Link to="/dashboard" className="admin-brand">
           <div className="brand-mark">
-            <img src=".\matta-logo.png" alt="MATTA" />
+            <img src="/matta-logo.png" alt="MATTA" />
           </div>
           <div className="brand-text">
             <span className="brand-text-main">MATTA</span>
