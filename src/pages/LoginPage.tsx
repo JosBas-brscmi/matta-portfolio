@@ -141,7 +141,7 @@ export default function LoginPage() {
         >
           <div className="brand-mark">
             <img
-              src="./matta-logo.png"
+              src="/matta-logo.png"
               alt="MATTA"
             />
           </div>
