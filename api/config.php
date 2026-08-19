@@ -1,5 +1,6 @@
 <?php
 $allowedOrigins = [
+    'http://10.8.1.50',
     'http://localhost:5173',
     'http://127.0.0.1:5173',
     'http://localhost',
