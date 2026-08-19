@@ -168,13 +168,13 @@ async function apiFetch<T>(
 // ============================================================
 
 export async function listTrainees() {
-  const { data, error } = await apiFetch<{ trainees: TraineeWithProfile[] }>('/matta/api/list_trainees.php')
+  const { data, error } = await apiFetch<{ trainees: TraineeWithProfile[] }>('/api/list_trainees.php')
   return { trainees: data?.trainees ?? [], error }
 }
 
 export async function getTraineeById(id: string) {
   const { data, error } = await apiFetch<{ trainee: TraineeFullDetail }>(
-    `/matta/api/get_trainee.php?id=${encodeURIComponent(id)}`
+    `/api/get_trainee.php?id=${encodeURIComponent(id)}`
   )
   return { trainee: data?.trainee ?? null, error }
 }
@@ -182,7 +182,7 @@ export async function getTraineeById(id: string) {
 export async function inviteTrainee(payload: InvitePayload): Promise<
   { ok: true; result: InviteResult } | { ok: false; error: string }
 > {
-  const { data, error } = await apiFetch<InviteResult>('/matta/api/invite_trainee.php', {
+  const { data, error } = await apiFetch<InviteResult>('/api/invite_trainee.php', {
     method: 'POST',
     body: JSON.stringify(payload),
   })
@@ -195,7 +195,7 @@ export async function inviteTrainee(payload: InvitePayload): Promise<
 }
 
 export async function updateTraineeStatus(traineeId: string, status: string) {
-  const { error } = await apiFetch('/matta/api/update_trainee_status.php', {
+  const { error } = await apiFetch('/api/update_trainee_status.php', {
     method: 'POST',
     body: JSON.stringify({ id: traineeId, status }),
   })
@@ -218,7 +218,7 @@ export async function findOrCreateCourse(
   }
 
   const { data, error } = await apiFetch<{ course_id: string; created: boolean }>(
-    '/matta/api/find_or_create_course.php',
+    '/api/find_or_create_course.php',
     {
       method: 'POST',
       body: JSON.stringify({
@@ -238,7 +238,7 @@ export async function findOrCreateCourse(
 }
 
 export async function getMyTraineeId(): Promise<{ trainee_id: string; error: { message: string } | null }> {
-  const { data, error } = await apiFetch<{ trainee_id: string }>('/matta/api/get_my_trainee_id.php')
+  const { data, error } = await apiFetch<{ trainee_id: string }>('/api/get_my_trainee_id.php')
   if (error || !data) {
     return { trainee_id: '', error: error ?? { message: 'No trainee record for current user' } }
   }
@@ -265,7 +265,7 @@ export async function listTraineeTrainingRecords(
 export async function createMyTrainingRecord(
   input: TrainingRecordFormInput,
 ): Promise<{ record: TrainingRecord | null; error: { message: string } | null }> {
-  const { data, error } = await apiFetch<{ record: TrainingRecord }>('/matta/api/create_training_record.php', {
+  const { data, error } = await apiFetch<{ record: TrainingRecord }>('/api/create_training_record.php', {
     method: 'POST',
     body: JSON.stringify(input),
   })
@@ -276,7 +276,7 @@ export async function updateMyTrainingRecord(
   id: string,
   input: TrainingRecordFormInput,
 ): Promise<{ record: TrainingRecord | null; error: { message: string } | null }> {
-  const { data, error } = await apiFetch<{ record: TrainingRecord }>('/matta/api/update_training_record.php', {
+  const { data, error } = await apiFetch<{ record: TrainingRecord }>('/api/update_training_record.php', {
     method: 'POST',
     body: JSON.stringify({ id, ...input }),
   })
@@ -284,7 +284,7 @@ export async function updateMyTrainingRecord(
 }
 
 export async function deleteMyTrainingRecord(id: string) {
-  const { error } = await apiFetch('/matta/api/delete_training_record.php', {
+  const { error } = await apiFetch('/api/delete_training_record.php', {
     method: 'POST',
     body: JSON.stringify({ id }),
   })

@@ -158,7 +158,7 @@ export async function replyToReview(
   reply: string,
 ): Promise<{ error: { message: string } | null }> {
   // rpc is not implemented in the local wrapper; call server endpoint instead
-  const res = await fetch(window.location.origin + '/matta/api/reply-review.php', {
+  const res = await fetch(window.location.origin + '/api/reply-review.php', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ review_id: reviewId, reply }),

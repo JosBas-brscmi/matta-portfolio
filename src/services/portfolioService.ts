@@ -302,7 +302,7 @@ export async function getFileDownloadUrl(
    */
   try {
     const response = await fetch(
-      `${window.location.origin}/matta/api/download.php?id=${encodeURIComponent(fileIdOrStoragePath)}`,
+      `${window.location.origin}/api/download.php?id=${encodeURIComponent(fileIdOrStoragePath)}`,
       {
         method: 'GET',
         credentials: 'include',
@@ -388,7 +388,7 @@ export async function listReviewQueue(): Promise<{
 }> {
   try {
     const response = await fetch(
-      `${window.location.origin}/matta/api/list_review_queue.php`,
+      `${window.location.origin}/api/list_review_queue.php`,
       {
         method: 'GET',
         credentials: 'include',
