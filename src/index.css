@@ -521,7 +521,7 @@ button {
   margin: 0 auto 1.75rem;
   border-radius: 50%;
   background-color: #0F0F0F;
-  background-image: url('./matta-logo.png');
+  background-image: url('/matta-logo.png');
   background-size: 84px 84px;
   background-position: center;
   background-repeat: no-repeat;
