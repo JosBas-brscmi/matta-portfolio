@@ -878,15 +878,16 @@ const _apiClient = {
         }
 
         const cleanPath =
-          avatarPath.replace(
-            /^\/+/,
-            '',
-          )
+          avatarPath.replace(/^\/+/, '')
+
+        const publicUrl =
+          cleanPath.startsWith('storage/')
+            ? `${window.location.origin}/matta/${cleanPath}`
+            : `${window.location.origin}/matta/storage/uploads/${cleanPath}`
 
         return {
           data: {
-            publicUrl:
-              `${window.location.origin}/matta/${cleanPath}`,
+            publicUrl,
           },
         }
       },
@@ -913,15 +914,16 @@ const _apiClient = {
         }
 
         const cleanPath =
-          storagePath.replace(
-            /^\/+/,
-            '',
-          )
+          storagePath.replace(/^\/+/, '')
+
+        const signedUrl =
+          cleanPath.startsWith('storage/')
+            ? `${window.location.origin}/matta/${cleanPath}`
+            : `${window.location.origin}/matta/storage/uploads/${cleanPath}`
 
         return {
           data: {
-            signedUrl:
-              `${window.location.origin}/matta/${cleanPath}`,
+            signedUrl,
           },
           error: null,
         }
