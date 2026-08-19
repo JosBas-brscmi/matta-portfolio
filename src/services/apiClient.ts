@@ -337,6 +337,20 @@ const _apiClient = {
   from(table: string) {
     const filters: Record<string, string> = {}
 
+    /*
+     * IN filters.
+     *
+     * Example:
+     *
+     * .in('portfolio_item_id', [
+     *   'uuid-1',
+     *   'uuid-2',
+     * ])
+     *
+     * The values are JSON encoded before being sent to PHP.
+     */
+    const inFilters: Record<string, any[]> = {}
+
     let order: string | undefined
     let selectStr = '*'
 
@@ -370,9 +384,20 @@ const _apiClient = {
       params.set('table', table)
       params.set('select', selectStr)
 
+      // Normal equality filters.
       Object.entries(filters).forEach(
         ([key, value]) => {
           params.set(key, value)
+        },
+      )
+
+      // IN filters.
+      Object.entries(inFilters).forEach(
+        ([column, values]) => {
+          params.set(
+            `in_${column}`,
+            JSON.stringify(values),
+          )
         },
       )
 
@@ -584,6 +609,25 @@ const _apiClient = {
       },
 
       // -----------------------------------------------------------------------
+      // WHERE column IN (...)
+      // -----------------------------------------------------------------------
+
+      in: (
+        col: string,
+        values: any[],
+      ) => {
+        if (!Array.isArray(values)) {
+          throw new Error(
+            `.in('${col}', values) requires an array of values.`,
+          )
+        }
+
+        inFilters[col] = values
+
+        return api
+      },
+
+      // -----------------------------------------------------------------------
       // ORDER BY
       // -----------------------------------------------------------------------
 
@@ -697,16 +741,6 @@ const _apiClient = {
     // -------------------------------------------------------------------------
     // Promise-like behavior
     // -------------------------------------------------------------------------
-    //
-    // This makes:
-    //
-    // await supabase
-    //   .from('users_profile')
-    //   .update({...})
-    //   .eq('id', userId)
-    //
-    // execute automatically.
-    // -------------------------------------------------------------------------
 
     ;(api as any).then = (
       resolve: any,
@@ -771,9 +805,6 @@ const _apiClient = {
                 () => null,
               )
 
-          /*
-           * HTTP errors OR JSON errors are both failures.
-           */
           if (
             !response.ok ||
             json?.error
