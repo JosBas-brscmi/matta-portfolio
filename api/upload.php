@@ -6,172 +6,481 @@ require_once __DIR__ . '/config.php';
 
 session_start();
 
+/*
+|--------------------------------------------------------------------------
+| JSON response helper
+|--------------------------------------------------------------------------
+*/
+
 function json_response($data, int $status = 200): void
 {
     http_response_code($status);
+
     echo json_encode($data);
+
     exit;
 }
 
 /*
- * Authentication
- */
+|--------------------------------------------------------------------------
+| Authentication
+|--------------------------------------------------------------------------
+|
+| Only authenticated users are allowed to upload files.
+|
+*/
+
 if (!isset($_SESSION['user_id'])) {
+
     json_response([
-        'error' => 'Not signed in'
+        'error' => 'Not signed in',
     ], 401);
 }
 
 /*
- * An actual upload request must contain a file.
- *
- * We intentionally do not depend on $_SERVER['REQUEST_METHOD'] here.
- * This avoids the current "Method not allowed" problem while still
- * ensuring that an upload cannot happen without an uploaded file.
- */
+|--------------------------------------------------------------------------
+| Validate uploaded file
+|--------------------------------------------------------------------------
+*/
+
 if (!isset($_FILES['file'])) {
+
     json_response([
         'error' => 'no_file',
-        'request_method' => $_SERVER['REQUEST_METHOD'] ?? 'unknown'
+        'request_method' =>
+            $_SERVER['REQUEST_METHOD'] ?? 'unknown',
     ], 400);
 }
 
 $file = $_FILES['file'];
 
 /*
- * PHP upload error
- */
-if ($file['error'] !== UPLOAD_ERR_OK) {
+|--------------------------------------------------------------------------
+| PHP upload error
+|--------------------------------------------------------------------------
+*/
+
+if (
+    !isset($file['error']) ||
+    $file['error'] !== UPLOAD_ERR_OK
+) {
+
     json_response([
         'error' => 'upload_error',
-        'detail' => $file['error']
+        'detail' => $file['error'] ?? null,
     ], 400);
 }
 
 /*
- * Validate filename
- */
-$originalName = basename($file['name'] ?? '');
+|--------------------------------------------------------------------------
+| Validate temporary upload
+|--------------------------------------------------------------------------
+*/
+
+if (
+    empty($file['tmp_name']) ||
+    !is_uploaded_file($file['tmp_name'])
+) {
+
+    json_response([
+        'error' => 'invalid_uploaded_file',
+    ], 400);
+}
+
+/*
+|--------------------------------------------------------------------------
+| Validate filename
+|--------------------------------------------------------------------------
+*/
+
+$originalName =
+    basename($file['name'] ?? '');
 
 if ($originalName === '') {
+
     json_response([
-        'error' => 'invalid_filename'
+        'error' => 'invalid_filename',
     ], 400);
 }
 
 /*
- * Get requested storage path.
- *
- * Avatar:
- *   <user-id>/avatar_timestamp.jpg
- *
- * Portfolio:
- *   <trainee-id>/<portfolio-id>/timestamp_file.pdf
- */
-$requestedPath = trim($_POST['storage_path'] ?? '');
+|--------------------------------------------------------------------------
+| Requested storage path
+|--------------------------------------------------------------------------
+|
+| Examples:
+|
+| Avatar:
+|   <user-id>/avatar_timestamp.jpg
+|
+| Portfolio:
+|   <trainee-id>/<portfolio-id>/timestamp_file.pdf
+|
+*/
 
-$uploadsDir = dirname(__DIR__) . '/storage/uploads';
+$requestedPath =
+    trim($_POST['storage_path'] ?? '');
+
+/*
+|--------------------------------------------------------------------------
+| Base storage directory
+|--------------------------------------------------------------------------
+|
+| Project:
+|
+| browave-matta-portfolio-main/
+| ├── api/
+| ├── src/
+| ├── storage/
+| │   └── uploads/
+| └── ...
+|
+*/
+
+$projectRoot =
+    dirname(__DIR__);
+
+$uploadsDir =
+    $projectRoot . '/storage/uploads';
+
+/*
+|--------------------------------------------------------------------------
+| Create base upload directory
+|--------------------------------------------------------------------------
+*/
 
 if (!is_dir($uploadsDir)) {
-    if (!mkdir($uploadsDir, 0755, true)) {
+
+    if (!mkdir(
+        $uploadsDir,
+        0755,
+        true
+    )) {
+
         json_response([
-            'error' => 'could_not_create_upload_directory'
+            'error' =>
+                'could_not_create_upload_directory',
         ], 500);
     }
 }
 
+/*
+|--------------------------------------------------------------------------
+| Build relative storage path
+|--------------------------------------------------------------------------
+*/
+
 if ($requestedPath !== '') {
 
-    $requestedPath = str_replace('\\', '/', $requestedPath);
-    $requestedPath = ltrim($requestedPath, '/');
+    /*
+     * Normalize Windows separators.
+     */
+    $requestedPath =
+        str_replace(
+            '\\',
+            '/',
+            $requestedPath
+        );
+
+    /*
+     * Remove leading slashes.
+     */
+    $requestedPath =
+        ltrim(
+            $requestedPath,
+            '/'
+        );
 
     /*
      * Prevent directory traversal.
      */
     if (
-        str_contains($requestedPath, '..') ||
-        str_contains($requestedPath, "\0") ||
-        preg_match('/[^a-zA-Z0-9._\/-]/', $requestedPath)
+        str_contains(
+            $requestedPath,
+            '..'
+        ) ||
+        str_contains(
+            $requestedPath,
+            "\0"
+        )
     ) {
+
         json_response([
-            'error' => 'invalid_storage_path'
+            'error' =>
+                'invalid_storage_path',
         ], 400);
     }
 
-    $relativePath = 'storage/uploads/' . $requestedPath;
+    /*
+     * Only allow safe path characters.
+     */
+    if (
+        !preg_match(
+            '/^[a-zA-Z0-9._\/-]+$/',
+            $requestedPath
+        )
+    ) {
+
+        json_response([
+            'error' =>
+                'invalid_storage_path',
+        ], 400);
+    }
+
+    $relativePath =
+        'storage/uploads/' .
+        $requestedPath;
 
 } else {
 
     /*
-     * Fallback for uploads that do not specify a path.
+     * Fallback when no storage_path was provided.
      */
-    $safeName = preg_replace(
-        '/[^a-zA-Z0-9._-]/',
-        '_',
-        $originalName
-    );
 
+    $safeName =
+        preg_replace(
+            '/[^a-zA-Z0-9._-]/',
+            '_',
+            $originalName
+        );
+
+    /*
+     * Generate a unique filename.
+     */
     $relativePath =
         'storage/uploads/' .
         time() .
         '_' .
+        bin2hex(
+            random_bytes(6)
+        ) .
+        '_' .
         $safeName;
 }
 
-$absolutePath = dirname(__DIR__) . '/' . $relativePath;
+/*
+|--------------------------------------------------------------------------
+| Build absolute path
+|--------------------------------------------------------------------------
+*/
 
-$parentDir = dirname($absolutePath);
+$absolutePath =
+    $projectRoot .
+    '/' .
+    $relativePath;
+
+/*
+|--------------------------------------------------------------------------
+| Verify that the final path stays inside uploads directory
+|--------------------------------------------------------------------------
+|
+| This is an additional protection against path traversal.
+|
+*/
+
+$realUploadsDir =
+    realpath($uploadsDir);
+
+$parentDir =
+    dirname($absolutePath);
+
+/*
+ * Parent directory might not exist yet, so create it first.
+ */
 
 if (!is_dir($parentDir)) {
-    if (!mkdir($parentDir, 0755, true)) {
+
+    if (!mkdir(
+        $parentDir,
+        0755,
+        true
+    )) {
+
         json_response([
-            'error' => 'could_not_create_storage_path'
+            'error' =>
+                'could_not_create_storage_path',
         ], 500);
     }
 }
 
-/*
- * Do not overwrite an existing file.
- */
-if (file_exists($absolutePath)) {
+$realParentDir =
+    realpath($parentDir);
+
+if (
+    $realUploadsDir === false ||
+    $realParentDir === false ||
+    (
+        $realParentDir !== $realUploadsDir &&
+        !str_starts_with(
+            $realParentDir .
+            DIRECTORY_SEPARATOR,
+            $realUploadsDir .
+            DIRECTORY_SEPARATOR
+        )
+    )
+) {
+
     json_response([
-        'error' => 'file_already_exists'
+        'error' =>
+            'invalid_storage_location',
+    ], 400);
+}
+
+/*
+|--------------------------------------------------------------------------
+| Do not overwrite existing files
+|--------------------------------------------------------------------------
+*/
+
+if (file_exists($absolutePath)) {
+
+    json_response([
+        'error' =>
+            'file_already_exists',
     ], 409);
 }
 
 /*
- * Move uploaded temporary file into storage.
- */
-if (!move_uploaded_file(
-    $file['tmp_name'],
-    $absolutePath
-)) {
+|--------------------------------------------------------------------------
+| Determine MIME type
+|--------------------------------------------------------------------------
+|
+| Do not rely entirely on the browser-provided MIME type.
+|
+*/
+
+$fileType =
+    '';
+
+if (
+    class_exists('finfo')
+) {
+
+    $finfo =
+        new finfo(
+            FILEINFO_MIME_TYPE
+        );
+
+    $fileType =
+        $finfo->file(
+            $file['tmp_name']
+        ) ?: '';
+}
+
+if ($fileType === '') {
+
+    $fileType =
+        $file['type'] ??
+        'application/octet-stream';
+}
+
+/*
+|--------------------------------------------------------------------------
+| Optional file-size protection
+|--------------------------------------------------------------------------
+|
+| 20 MB maximum.
+|
+*/
+
+$maxFileSize =
+    20 * 1024 * 1024;
+
+if (
+    isset($file['size']) &&
+    $file['size'] > $maxFileSize
+) {
+
     json_response([
-        'error' => 'move_failed'
+        'error' =>
+            'file_too_large',
+        'max_size_bytes' =>
+            $maxFileSize,
+    ], 413);
+}
+
+/*
+|--------------------------------------------------------------------------
+| Move uploaded file
+|--------------------------------------------------------------------------
+*/
+
+if (
+    !move_uploaded_file(
+        $file['tmp_name'],
+        $absolutePath
+    )
+) {
+
+    json_response([
+        'error' =>
+            'move_failed',
     ], 500);
 }
 
 /*
- * Determine MIME type.
- */
-$fileType = $file['type'] ?? '';
+|--------------------------------------------------------------------------
+| Verify file actually exists
+|--------------------------------------------------------------------------
+*/
 
-if (!$fileType) {
-    $finfo = new finfo(FILEINFO_MIME_TYPE);
-    $fileType = $finfo->file($absolutePath) ?: 'application/octet-stream';
+if (!file_exists($absolutePath)) {
+
+    json_response([
+        'error' =>
+            'file_not_found_after_upload',
+    ], 500);
 }
 
 /*
- * Application is served from /matta, so generate a URL that includes it.
- */
-$publicUrl = '/matta/' . $relativePath;
+|--------------------------------------------------------------------------
+| File size
+|--------------------------------------------------------------------------
+*/
+
+$fileSize =
+    filesize($absolutePath);
+
+if ($fileSize === false) {
+    $fileSize = 0;
+}
+
+/*
+|--------------------------------------------------------------------------
+| Public URL
+|--------------------------------------------------------------------------
+|
+| Your application is currently served from:
+|
+| /matta
+|
+*/
+
+$publicUrl =
+    '/matta/' .
+    $relativePath;
+
+/*
+|--------------------------------------------------------------------------
+| Return upload information
+|--------------------------------------------------------------------------
+*/
 
 json_response([
     'data' => [
-        'publicUrl' => $publicUrl,
-        'storage_path' => $relativePath,
-        'file_name' => $originalName,
-        'file_type' => $fileType,
-        'file_size_bytes' => filesize($absolutePath)
-    ]
+        'publicUrl' =>
+            $publicUrl,
+
+        'storage_path' =>
+            $relativePath,
+
+        'file_name' =>
+            $originalName,
+
+        'file_type' =>
+            $fileType,
+
+        'file_size_bytes' =>
+            $fileSize,
+    ],
 ]);
