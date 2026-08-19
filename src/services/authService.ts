@@ -1,7 +1,4 @@
-const APP_BASE_PATH = '/matta'
-const API_BASE_URL =
-  import.meta.env.VITE_API_URL ??
-  `${window.location.protocol}//${window.location.hostname}${APP_BASE_PATH}/api`
+const API_BASE_URL = '/api'
 
 let accessToken: string | null = null
 
