@@ -1,10 +1,13 @@
+
 <?php
 
 header('Content-Type: application/json');
 
 require_once __DIR__ . '/config.php';
 
-session_start();
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
 
 /*
 |--------------------------------------------------------------------------
@@ -25,9 +28,6 @@ function json_response($data, int $status = 200): void
 |--------------------------------------------------------------------------
 | Authentication
 |--------------------------------------------------------------------------
-|
-| Only authenticated users are allowed to upload files.
-|
 */
 
 if (!isset($_SESSION['user_id'])) {
@@ -107,15 +107,6 @@ if ($originalName === '') {
 |--------------------------------------------------------------------------
 | Requested storage path
 |--------------------------------------------------------------------------
-|
-| Examples:
-|
-| Avatar:
-|   <user-id>/avatar_timestamp.jpg
-|
-| Portfolio:
-|   <trainee-id>/<portfolio-id>/timestamp_file.pdf
-|
 */
 
 $requestedPath =
@@ -125,16 +116,6 @@ $requestedPath =
 |--------------------------------------------------------------------------
 | Base storage directory
 |--------------------------------------------------------------------------
-|
-| Project:
-|
-| browave-matta-portfolio-main/
-| ├── api/
-| ├── src/
-| ├── storage/
-| │   └── uploads/
-| └── ...
-|
 */
 
 $projectRoot =
@@ -153,7 +134,7 @@ if (!is_dir($uploadsDir)) {
 
     if (!mkdir(
         $uploadsDir,
-        0755,
+        0775,
         true
     )) {
 
@@ -271,11 +252,8 @@ $absolutePath =
 
 /*
 |--------------------------------------------------------------------------
-| Verify that the final path stays inside uploads directory
+| Verify final path stays inside uploads directory
 |--------------------------------------------------------------------------
-|
-| This is an additional protection against path traversal.
-|
 */
 
 $realUploadsDir =
@@ -285,14 +263,14 @@ $parentDir =
     dirname($absolutePath);
 
 /*
- * Parent directory might not exist yet, so create it first.
+ * Create requested directory if necessary.
  */
 
 if (!is_dir($parentDir)) {
 
     if (!mkdir(
         $parentDir,
-        0755,
+        0775,
         true
     )) {
 
@@ -344,17 +322,11 @@ if (file_exists($absolutePath)) {
 |--------------------------------------------------------------------------
 | Determine MIME type
 |--------------------------------------------------------------------------
-|
-| Do not rely entirely on the browser-provided MIME type.
-|
 */
 
-$fileType =
-    '';
+$fileType = '';
 
-if (
-    class_exists('finfo')
-) {
+if (class_exists('finfo')) {
 
     $finfo =
         new finfo(
@@ -376,11 +348,15 @@ if ($fileType === '') {
 
 /*
 |--------------------------------------------------------------------------
-| Optional file-size protection
+| File-size protection
 |--------------------------------------------------------------------------
 |
-| 20 MB maximum.
+| Application maximum: 20 MB.
 |
+| PHP itself must also allow at least 20 MB through
+| upload_max_filesize and post_max_size.
+|
+|--------------------------------------------------------------------------
 */
 
 $maxFileSize =
@@ -394,6 +370,7 @@ if (
     json_response([
         'error' =>
             'file_too_large',
+
         'max_size_bytes' =>
             $maxFileSize,
     ], 413);
@@ -420,7 +397,7 @@ if (
 
 /*
 |--------------------------------------------------------------------------
-| Verify file actually exists
+| Verify file exists
 |--------------------------------------------------------------------------
 */
 
@@ -450,14 +427,27 @@ if ($fileSize === false) {
 | Public URL
 |--------------------------------------------------------------------------
 |
-| Your application is currently served from:
+| IMPORTANT:
 |
-| /matta
+| The current production site is served at:
 |
+|     http://10.8.1.50
+|
+| It is NOT currently under /matta.
+|
+| Therefore:
+|
+|     storage/uploads/example.jpg
+|
+| becomes:
+|
+|     /storage/uploads/example.jpg
+|
+|--------------------------------------------------------------------------
 */
 
 $publicUrl =
-    '/matta/' .
+    '/' .
     $relativePath;
 
 /*

@@ -1,9 +1,18 @@
 <?php
 
 header('Content-Type: application/json');
+
 require_once __DIR__ . '/config.php';
 
-session_start();
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
+
+/*
+|--------------------------------------------------------------------------
+| JSON response
+|--------------------------------------------------------------------------
+*/
 
 function json_response($data, int $status = 200): void
 {
@@ -12,164 +21,125 @@ function json_response($data, int $status = 200): void
     exit;
 }
 
-function map_record(array $row): array
-{
-    return [
-        'id' => $row['id'],
-        'trainee_id' => $row['trainee_id'],
-        'course_id' => $row['course_id'],
-        'attendance_date' => $row['attendance_date'],
-        'attended' => (bool)$row['attended'],
-        'hours' => $row['hours'] !== null ? (float)$row['hours'] : 0,
-        'test_score' => $row['test_score'] !== null
-            ? (float)$row['test_score']
-            : null,
-        'reflection' => $row['reflection'],
-        'completion_status' => $row['completion_status'],
-        'created_at' => $row['created_at'],
-        'updated_at' => $row['updated_at'],
-        'course' => $row['course_id'] ? [
-            'id' => $row['course_id'],
-            'course_code' => $row['course_code'],
-            'course_name' => $row['course_name'],
-            'category' => $row['category'],
-            'phase' => $row['phase'],
-            'instructor' => $row['instructor'],
-        ] : null,
-    ];
+/*
+|--------------------------------------------------------------------------
+| Authentication
+|--------------------------------------------------------------------------
+*/
+
+if (empty($_SESSION['user_id'])) {
+    json_response([
+        'error' => 'Not signed in'
+    ], 401);
 }
+
+$userId = $_SESSION['user_id'];
+
+/*
+|--------------------------------------------------------------------------
+| Trainee ID
+|--------------------------------------------------------------------------
+*/
+
+$traineeId = trim($_GET['trainee_id'] ?? '');
+
+if ($traineeId === '') {
+    json_response([
+        'error' => 'trainee_id is required'
+    ], 400);
+}
+
+/*
+|--------------------------------------------------------------------------
+| Database
+|--------------------------------------------------------------------------
+*/
 
 try {
 
-    $pdo = get_db();
-
-    $userId = $_SESSION['user_id'] ?? null;
-
-    if (!$userId) {
-        json_response(['error' => 'Not signed in'], 401);
-    }
-
-    $traineeId = $_GET['trainee_id'] ?? '';
-
-    if (!preg_match(
-        '/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/',
-        $traineeId
-    )) {
-        json_response([
-            'error' => 'Invalid trainee ID'
-        ], 400);
-    }
+    $db = get_db();
 
     /*
-     * Verify the current user's role.
+     * Get the logged-in user's role.
      */
-    $stmt = $pdo->prepare("
+    $roleStmt = $db->prepare("
         SELECT role
         FROM public.users_profile
-        WHERE id = :id
+        WHERE id = :user_id
         LIMIT 1
     ");
 
-    $stmt->execute([
-        ':id' => $userId
+    $roleStmt->execute([
+        ':user_id' => $userId
     ]);
 
-    $caller = $stmt->fetch(PDO::FETCH_ASSOC);
+    $profile = $roleStmt->fetch(PDO::FETCH_ASSOC);
 
-    if (!$caller) {
-        json_response(['error' => 'User not found'], 404);
-    }
-
-    $allowedRoles = [
-        'owner',
-        'ma_center',
-        'ma_board',
-        'mentor',
-        'manager'
-    ];
+    $role = strtolower(trim($profile['role'] ?? ''));
 
     /*
-     * MT users should only use list_my_training_records.php.
+     * Administrative/staff users may view any trainee.
      */
-    if (!in_array($caller['role'], $allowedRoles, true)) {
+    $privilegedRoles = [
+        'admin',
+        'administrator',
+        'staff',
+        'trainer',
+        'manager',
+        'supervisor'
+    ];
+
+    $authorized = in_array($role, $privilegedRoles, true);
+
+    /*
+     * A normal trainee may only view their own records.
+     */
+    if (!$authorized) {
+
+        $traineeStmt = $db->prepare("
+            SELECT id
+            FROM public.trainees
+            WHERE id = :trainee_id
+              AND user_id = :user_id
+            LIMIT 1
+        ");
+
+        $traineeStmt->execute([
+            ':trainee_id' => $traineeId,
+            ':user_id' => $userId
+        ]);
+
+        $authorized = (bool) $traineeStmt->fetch(PDO::FETCH_ASSOC);
+    }
+
+    if (!$authorized) {
         json_response([
-            'error' => 'Forbidden'
+            'error' => 'Forbidden',
+            'message' => 'You are not authorized to view this trainee.'
         ], 403);
     }
 
     /*
-     * For mentors, only allow trainees assigned to them.
+     * Fetch training records.
      */
-    if ($caller['role'] === 'mentor') {
-
-        $stmt = $pdo->prepare("
-            SELECT id
-            FROM public.trainees
-            WHERE id = :trainee_id
-              AND mentor_id = :mentor_id
-            LIMIT 1
-        ");
-
-        $stmt->execute([
-            ':trainee_id' => $traineeId,
-            ':mentor_id' => $userId
-        ]);
-
-        if (!$stmt->fetch()) {
-            json_response([
-                'error' => 'Forbidden'
-            ], 403);
-        }
-    }
-
-    /*
-     * For managers, limit access to their department.
-     */
-    if ($caller['role'] === 'manager') {
-
-        $stmt = $pdo->prepare("
-            SELECT t.id
-            FROM public.trainees t
-            WHERE t.id = :trainee_id
-              AND t.department = (
-                  SELECT department
-                  FROM public.users_profile
-                  WHERE id = :manager_id
-              )
-            LIMIT 1
-        ");
-
-        $stmt->execute([
-            ':trainee_id' => $traineeId,
-            ':manager_id' => $userId
-        ]);
-
-        if (!$stmt->fetch()) {
-            json_response([
-                'error' => 'Forbidden'
-            ], 403);
-        }
-    }
-
-    $stmt = $pdo->prepare("
+    $stmt = $db->prepare("
         SELECT
             tr.id,
             tr.trainee_id,
             tr.course_id,
             tr.attendance_date,
             tr.attended,
-            tr.hours,
             tr.test_score,
             tr.reflection,
             tr.completion_status,
+            tr.hours,
             tr.created_at,
             tr.updated_at,
 
             c.course_code,
             c.course_name,
             c.category,
-            c.phase,
-            c.instructor
+            c.phase
 
         FROM public.training_records tr
 
@@ -178,28 +148,30 @@ try {
 
         WHERE tr.trainee_id = :trainee_id
 
-        ORDER BY tr.attendance_date DESC, tr.created_at DESC
+        ORDER BY
+            tr.attendance_date DESC NULLS LAST,
+            tr.created_at DESC
     ");
 
     $stmt->execute([
         ':trainee_id' => $traineeId
     ]);
 
-    $records = [];
-
-    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        $records[] = map_record($row);
-    }
+    $records = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     json_response([
-        'records' => $records
+        'data' => $records
     ]);
+
 } catch (Throwable $e) {
 
-    error_log('[list_trainee_training_records] ' . $e->getMessage());
+    error_log(
+        'list_trainee_training_records.php: ' .
+        $e->getMessage()
+    );
 
     json_response([
-        'error' => 'server_error',
+        'error' => 'Failed to retrieve training records',
         'detail' => $e->getMessage()
     ], 500);
 }
