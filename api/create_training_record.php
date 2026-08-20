@@ -10,7 +10,7 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 
 /*
 |--------------------------------------------------------------------------
-| JSON response helper
+| JSON response
 |--------------------------------------------------------------------------
 */
 
@@ -42,7 +42,7 @@ $userId = $_SESSION['user_id'];
 
 /*
 |--------------------------------------------------------------------------
-| Read request body
+| Read request
 |--------------------------------------------------------------------------
 */
 
@@ -60,12 +60,8 @@ if (!is_array($input)) {
 
 /*
 |--------------------------------------------------------------------------
-| Required fields
+| Course/activity name
 |--------------------------------------------------------------------------
-|
-| The React TrainingRecordModal sends course_name rather than course_id.
-| The trainee_id is also determined from the logged-in session.
-|
 */
 
 $courseName = trim($input['course_name'] ?? '');
@@ -76,7 +72,36 @@ if ($courseName === '') {
     ], 400);
 }
 
-$attendanceDate = trim($input['attendance_date'] ?? '');
+/*
+|--------------------------------------------------------------------------
+| Course phase
+|--------------------------------------------------------------------------
+*/
+
+$coursePhase = trim(
+    $input['course_phase'] ?? 'phase1_general'
+);
+
+$allowedPhases = [
+    'phase1_general',
+    'phase2_department'
+];
+
+if (!in_array($coursePhase, $allowedPhases, true)) {
+    json_response([
+        'error' => 'Invalid course phase'
+    ], 400);
+}
+
+/*
+|--------------------------------------------------------------------------
+| Attendance date
+|--------------------------------------------------------------------------
+*/
+
+$attendanceDate = trim(
+    $input['attendance_date'] ?? ''
+);
 
 if ($attendanceDate === '') {
     json_response([
@@ -86,15 +111,18 @@ if ($attendanceDate === '') {
 
 /*
 |--------------------------------------------------------------------------
-| Validate attendance date
+| Validate date
 |--------------------------------------------------------------------------
 */
 
-$dateObject = DateTime::createFromFormat('Y-m-d', $attendanceDate);
+$date = DateTime::createFromFormat(
+    'Y-m-d',
+    $attendanceDate
+);
 
 if (
-    !$dateObject ||
-    $dateObject->format('Y-m-d') !== $attendanceDate
+    !$date ||
+    $date->format('Y-m-d') !== $attendanceDate
 ) {
     json_response([
         'error' => 'Invalid attendance_date'
@@ -103,41 +131,13 @@ if (
 
 /*
 |--------------------------------------------------------------------------
-| Optional / form fields
-|--------------------------------------------------------------------------
-*/
-
-$coursePhase = trim(
-    $input['course_phase'] ??
-    'phase1_general'
-);
-
-$courseInstructor = trim(
-    $input['course_instructor'] ??
-    ''
-);
-
-$courseCategory = trim(
-    $input['course_category'] ??
-    ''
-);
-
-$reflection = trim(
-    $input['reflection'] ??
-    ''
-);
-
-if ($reflection === '') {
-    $reflection = null;
-}
-
-/*
-|--------------------------------------------------------------------------
 | Attended
 |--------------------------------------------------------------------------
 */
 
-if (isset($input['attended'])) {
+$attended = true;
+
+if (array_key_exists('attended', $input)) {
 
     if (is_bool($input['attended'])) {
 
@@ -145,20 +145,16 @@ if (isset($input['attended'])) {
 
     } else {
 
-        $attended = filter_var(
+        $parsedAttended = filter_var(
             $input['attended'],
             FILTER_VALIDATE_BOOLEAN,
             FILTER_NULL_ON_FAILURE
         );
 
-        if ($attended === null) {
-            $attended = false;
+        if ($parsedAttended !== null) {
+            $attended = $parsedAttended;
         }
     }
-
-} else {
-
-    $attended = true;
 }
 
 /*
@@ -167,22 +163,20 @@ if (isset($input['attended'])) {
 |--------------------------------------------------------------------------
 */
 
-$hoursRaw = $input['hours'] ?? null;
+$hours = 0;
 
 if (
-    $hoursRaw === null ||
-    $hoursRaw === ''
+    isset($input['hours']) &&
+    $input['hours'] !== ''
 ) {
-    $hours = null;
-} else {
 
-    if (!is_numeric($hoursRaw)) {
+    if (!is_numeric($input['hours'])) {
         json_response([
-            'error' => 'hours must be a number'
+            'error' => 'hours must be numeric'
         ], 400);
     }
 
-    $hours = (float) $hoursRaw;
+    $hours = (float) $input['hours'];
 
     if ($hours < 0 || $hours > 24) {
         json_response([
@@ -197,33 +191,63 @@ if (
 |--------------------------------------------------------------------------
 */
 
-$testScoreRaw = $input['test_score'] ?? null;
+$testScore = null;
 
 if (
-    $testScoreRaw === null ||
-    $testScoreRaw === ''
+    isset($input['test_score']) &&
+    $input['test_score'] !== '' &&
+    $input['test_score'] !== null
 ) {
 
-    $testScore = null;
-
-} else {
-
-    if (
-        !is_numeric($testScoreRaw) ||
-        floor((float) $testScoreRaw) != (float) $testScoreRaw
-    ) {
+    if (!is_numeric($input['test_score'])) {
         json_response([
-            'error' => 'test_score must be a whole number'
+            'error' => 'test_score must be numeric'
         ], 400);
     }
 
-    $testScore = (int) $testScoreRaw;
+    $testScore = (int) $input['test_score'];
 
     if ($testScore < 0 || $testScore > 100) {
         json_response([
             'error' => 'test_score must be between 0 and 100'
         ], 400);
     }
+}
+
+/*
+|--------------------------------------------------------------------------
+| Reflection
+|--------------------------------------------------------------------------
+*/
+
+$reflection = trim(
+    $input['reflection'] ?? ''
+);
+
+if ($reflection === '') {
+    $reflection = null;
+}
+
+/*
+|--------------------------------------------------------------------------
+| Course information
+|--------------------------------------------------------------------------
+*/
+
+$courseInstructor = trim(
+    $input['course_instructor'] ?? ''
+);
+
+if ($courseInstructor === '') {
+    $courseInstructor = null;
+}
+
+$courseCategory = trim(
+    $input['course_category'] ?? ''
+);
+
+if ($courseCategory === '') {
+    $courseCategory = null;
 }
 
 /*
@@ -238,13 +262,8 @@ try {
 
     /*
     |--------------------------------------------------------------------------
-    | Find the trainee belonging to the logged-in user
+    | Find trainee belonging to logged-in user
     |--------------------------------------------------------------------------
-    |
-    | This is the important fix.
-    |
-    | The browser does NOT need to send trainee_id.
-    |
     */
 
     $traineeStmt = $db->prepare("
@@ -263,7 +282,7 @@ try {
     if (!$trainee) {
         json_response([
             'error' => 'No trainee profile found',
-            'message' => 'The logged-in user is not associated with a trainee profile.'
+            'message' => 'The logged-in user is not linked to a trainee record.'
         ], 404);
     }
 
@@ -271,32 +290,23 @@ try {
 
     /*
     |--------------------------------------------------------------------------
-    | Validate course phase
-    |--------------------------------------------------------------------------
-    */
-
-    $allowedPhases = [
-        'phase1_general',
-        'phase2_department'
-    ];
-
-    if (!in_array($coursePhase, $allowedPhases, true)) {
-        json_response([
-            'error' => 'Invalid course phase'
-        ], 400);
-    }
-
-    /*
-    |--------------------------------------------------------------------------
     | Find existing course
     |--------------------------------------------------------------------------
-    |
-    | First try to find an existing course with the same name and phase.
-    |
     */
 
     $courseStmt = $db->prepare("
-        SELECT *
+        SELECT
+            id,
+            course_code,
+            course_name,
+            category,
+            phase,
+            hours,
+            instructor,
+            applicable_departments,
+            is_active,
+            created_at,
+            updated_at
         FROM public.courses
         WHERE LOWER(course_name) = LOWER(:course_name)
           AND phase = :phase
@@ -318,18 +328,11 @@ try {
 
     if (!$course) {
 
-        /*
-         * Generate a course code.
-         *
-         * Example:
-         * MATTA-TRAINING-A1B2C3D4
-         */
-
         $courseCode =
-            'MATTA-TRAINING-' .
-            strtoupper(bin2hex(random_bytes(4)));
+            'MATTA-' .
+            strtoupper(bin2hex(random_bytes(5)));
 
-        $createCourseStmt = $db->prepare("
+        $courseInsert = $db->prepare("
             INSERT INTO public.courses (
                 course_code,
                 course_name,
@@ -337,7 +340,6 @@ try {
                 phase,
                 hours,
                 instructor,
-                description,
                 is_active,
                 created_at,
                 updated_at
@@ -349,95 +351,40 @@ try {
                 :phase,
                 :hours,
                 :instructor,
-                NULL,
-                TRUE,
+                :is_active,
                 NOW(),
                 NOW()
             )
-            RETURNING *
+            RETURNING
+                id,
+                course_code,
+                course_name,
+                category,
+                phase,
+                hours,
+                instructor,
+                applicable_departments,
+                is_active,
+                created_at,
+                updated_at
         ");
 
-        $createCourseStmt->execute([
+        $courseInsert->execute([
             ':course_code' => $courseCode,
             ':course_name' => $courseName,
-            ':category' => $courseCategory !== ''
-                ? $courseCategory
-                : null,
+            ':category' => $courseCategory,
             ':phase' => $coursePhase,
             ':hours' => $hours,
-            ':instructor' => $courseInstructor !== ''
-                ? $courseInstructor
-                : null
+            ':instructor' => $courseInstructor,
+            ':is_active' => true
         ]);
 
-        $course = $createCourseStmt->fetch(PDO::FETCH_ASSOC);
+        $course = $courseInsert->fetch(PDO::FETCH_ASSOC);
 
         if (!$course) {
             json_response([
                 'error' => 'Failed to create course'
             ], 500);
-        }
-
-    } else {
-
-        /*
-         * Use the existing course.
-         */
-
-        /*
-         * Keep the catalog information up to date if the
-         * user supplied instructor/category information.
-         */
-
-        $updates = [];
-        $params = [
-            ':course_id' => $course['id']
-        ];
-
-        if (
-            $courseInstructor !== '' &&
-            empty($course['instructor'])
-        ) {
-            $updates[] = 'instructor = :instructor';
-            $params[':instructor'] = $courseInstructor;
-        }
-
-        if (
-            $courseCategory !== '' &&
-            empty($course['category'])
-        ) {
-            $updates[] = 'category = :category';
-            $params[':category'] = $courseCategory;
-        }
-
-        if (!empty($updates)) {
-
-            $updates[] = 'updated_at = NOW()';
-
-            $updateCourseStmt = $db->prepare("
-                UPDATE public.courses
-                SET " . implode(', ', $updates) . "
-                WHERE id = :course_id
-            ");
-
-            $updateCourseStmt->execute($params);
-
-            /*
-             * Reload the course after updating.
-             */
-
-            $reloadCourseStmt = $db->prepare("
-                SELECT *
-                FROM public.courses
-                WHERE id = :course_id
-                LIMIT 1
-            ");
-
-            $reloadCourseStmt->execute([
-                ':course_id' => $course['id']
-            ]);
-
-            $course = $reloadCourseStmt->fetch(PDO::FETCH_ASSOC);
         }
     }
 
@@ -445,23 +392,7 @@ try {
 
     /*
     |--------------------------------------------------------------------------
-    | Completion status
-    |--------------------------------------------------------------------------
-    */
-
-    $completionStatus =
-        $input['completion_status'] ??
-        null;
-
-    if (
-        $completionStatus === ''
-    ) {
-        $completionStatus = null;
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | Insert training record
+    | Create training record
     |--------------------------------------------------------------------------
     */
 
@@ -473,7 +404,6 @@ try {
             attended,
             test_score,
             reflection,
-            completion_status,
             hours,
             created_at,
             updated_at
@@ -485,7 +415,6 @@ try {
             :attended,
             :test_score,
             :reflection,
-            :completion_status,
             :hours,
             NOW(),
             NOW()
@@ -500,7 +429,6 @@ try {
         ':attended' => $attended,
         ':test_score' => $testScore,
         ':reflection' => $reflection,
-        ':completion_status' => $completionStatus,
         ':hours' => $hours
     ]);
 
@@ -508,22 +436,23 @@ try {
 
     if (!$record) {
         json_response([
-            'error' => 'Failed to create training record'
+            'error' => 'Training record was not created'
         ], 500);
     }
 
     /*
     |--------------------------------------------------------------------------
-    | Return result
+    | Return response expected by traineeService.ts
     |--------------------------------------------------------------------------
     */
 
     json_response([
-        'data' => [
-            'record' => $record,
-            'course' => $course,
-            'trainee_id' => $traineeId
-        ]
+        'record' => array_merge(
+            $record,
+            [
+                'course' => $course
+            ]
+        )
     ], 201);
 
 } catch (Throwable $e) {
