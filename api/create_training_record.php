@@ -10,14 +10,19 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 
 /*
 |--------------------------------------------------------------------------
-| JSON response
+| JSON response helper
 |--------------------------------------------------------------------------
 */
 
 function json_response($data, int $status = 200): void
 {
     http_response_code($status);
-    echo json_encode($data);
+
+    echo json_encode(
+        $data,
+        JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+    );
+
     exit;
 }
 
@@ -33,81 +38,193 @@ if (empty($_SESSION['user_id'])) {
     ], 401);
 }
 
+$userId = $_SESSION['user_id'];
+
 /*
 |--------------------------------------------------------------------------
-| Read request
+| Read request body
 |--------------------------------------------------------------------------
 */
 
-$input = json_decode(
-    file_get_contents('php://input'),
-    true
-);
+$rawInput = file_get_contents('php://input');
+
+$input = json_decode($rawInput, true);
 
 if (!is_array($input)) {
     $input = $_POST;
+}
+
+if (!is_array($input)) {
+    $input = [];
 }
 
 /*
 |--------------------------------------------------------------------------
 | Required fields
 |--------------------------------------------------------------------------
+|
+| The React TrainingRecordModal sends course_name rather than course_id.
+| The trainee_id is also determined from the logged-in session.
+|
 */
 
-$traineeId = trim($input['trainee_id'] ?? '');
-$courseId = trim($input['course_id'] ?? '');
+$courseName = trim($input['course_name'] ?? '');
 
-if ($traineeId === '') {
+if ($courseName === '') {
     json_response([
-        'error' => 'trainee_id is required'
+        'error' => 'course_name is required'
     ], 400);
 }
 
-if ($courseId === '') {
+$attendanceDate = trim($input['attendance_date'] ?? '');
+
+if ($attendanceDate === '') {
     json_response([
-        'error' => 'course_id is required'
+        'error' => 'attendance_date is required'
     ], 400);
 }
 
 /*
 |--------------------------------------------------------------------------
-| Optional fields
+| Validate attendance date
 |--------------------------------------------------------------------------
 */
 
-$attendanceDate =
-    !empty($input['attendance_date'])
-        ? $input['attendance_date']
-        : null;
+$dateObject = DateTime::createFromFormat('Y-m-d', $attendanceDate);
 
-$attended =
-    isset($input['attended'])
-        ? filter_var(
+if (
+    !$dateObject ||
+    $dateObject->format('Y-m-d') !== $attendanceDate
+) {
+    json_response([
+        'error' => 'Invalid attendance_date'
+    ], 400);
+}
+
+/*
+|--------------------------------------------------------------------------
+| Optional / form fields
+|--------------------------------------------------------------------------
+*/
+
+$coursePhase = trim(
+    $input['course_phase'] ??
+    'phase1_general'
+);
+
+$courseInstructor = trim(
+    $input['course_instructor'] ??
+    ''
+);
+
+$courseCategory = trim(
+    $input['course_category'] ??
+    ''
+);
+
+$reflection = trim(
+    $input['reflection'] ??
+    ''
+);
+
+if ($reflection === '') {
+    $reflection = null;
+}
+
+/*
+|--------------------------------------------------------------------------
+| Attended
+|--------------------------------------------------------------------------
+*/
+
+if (isset($input['attended'])) {
+
+    if (is_bool($input['attended'])) {
+
+        $attended = $input['attended'];
+
+    } else {
+
+        $attended = filter_var(
             $input['attended'],
             FILTER_VALIDATE_BOOLEAN,
             FILTER_NULL_ON_FAILURE
-        )
-        : false;
+        );
 
-$testScore =
-    ($input['test_score'] ?? '') !== ''
-        ? $input['test_score']
-        : null;
+        if ($attended === null) {
+            $attended = false;
+        }
+    }
 
-$reflection =
-    ($input['reflection'] ?? '') !== ''
-        ? $input['reflection']
-        : null;
+} else {
 
-$completionStatus =
-    ($input['completion_status'] ?? '') !== ''
-        ? $input['completion_status']
-        : null;
+    $attended = true;
+}
 
-$hours =
-    ($input['hours'] ?? '') !== ''
-        ? $input['hours']
-        : null;
+/*
+|--------------------------------------------------------------------------
+| Hours
+|--------------------------------------------------------------------------
+*/
+
+$hoursRaw = $input['hours'] ?? null;
+
+if (
+    $hoursRaw === null ||
+    $hoursRaw === ''
+) {
+    $hours = null;
+} else {
+
+    if (!is_numeric($hoursRaw)) {
+        json_response([
+            'error' => 'hours must be a number'
+        ], 400);
+    }
+
+    $hours = (float) $hoursRaw;
+
+    if ($hours < 0 || $hours > 24) {
+        json_response([
+            'error' => 'hours must be between 0 and 24'
+        ], 400);
+    }
+}
+
+/*
+|--------------------------------------------------------------------------
+| Test score
+|--------------------------------------------------------------------------
+*/
+
+$testScoreRaw = $input['test_score'] ?? null;
+
+if (
+    $testScoreRaw === null ||
+    $testScoreRaw === ''
+) {
+
+    $testScore = null;
+
+} else {
+
+    if (
+        !is_numeric($testScoreRaw) ||
+        floor((float) $testScoreRaw) != (float) $testScoreRaw
+    ) {
+        json_response([
+            'error' => 'test_score must be a whole number'
+        ], 400);
+    }
+
+    $testScore = (int) $testScoreRaw;
+
+    if ($testScore < 0 || $testScore > 100) {
+        json_response([
+            'error' => 'test_score must be between 0 and 100'
+        ], 400);
+    }
+}
 
 /*
 |--------------------------------------------------------------------------
@@ -119,114 +236,236 @@ try {
 
     $db = get_db();
 
-    $userId = $_SESSION['user_id'];
-
     /*
-     * Determine the logged-in user's role.
-     */
-    $roleStmt = $db->prepare("
-        SELECT role
-        FROM public.users_profile
-        WHERE id = :user_id
+    |--------------------------------------------------------------------------
+    | Find the trainee belonging to the logged-in user
+    |--------------------------------------------------------------------------
+    |
+    | This is the important fix.
+    |
+    | The browser does NOT need to send trainee_id.
+    |
+    */
+
+    $traineeStmt = $db->prepare("
+        SELECT id
+        FROM public.trainees
+        WHERE user_id = :user_id
         LIMIT 1
     ");
 
-    $roleStmt->execute([
+    $traineeStmt->execute([
         ':user_id' => $userId
     ]);
 
-    $profile = $roleStmt->fetch(PDO::FETCH_ASSOC);
+    $trainee = $traineeStmt->fetch(PDO::FETCH_ASSOC);
 
-    $role = strtolower(trim($profile['role'] ?? ''));
+    if (!$trainee) {
+        json_response([
+            'error' => 'No trainee profile found',
+            'message' => 'The logged-in user is not associated with a trainee profile.'
+        ], 404);
+    }
+
+    $traineeId = $trainee['id'];
 
     /*
-     * Administrative/staff users can create records
-     * for any trainee.
-     */
-    $privilegedRoles = [
-        'admin',
-        'administrator',
-        'staff',
-        'trainer',
-        'manager',
-        'supervisor'
+    |--------------------------------------------------------------------------
+    | Validate course phase
+    |--------------------------------------------------------------------------
+    */
+
+    $allowedPhases = [
+        'phase1_general',
+        'phase2_department'
     ];
 
-    $authorized = in_array($role, $privilegedRoles, true);
+    if (!in_array($coursePhase, $allowedPhases, true)) {
+        json_response([
+            'error' => 'Invalid course phase'
+        ], 400);
+    }
 
     /*
-     * Normal trainee users can only create records
-     * belonging to themselves.
-     */
-    if (!$authorized) {
+    |--------------------------------------------------------------------------
+    | Find existing course
+    |--------------------------------------------------------------------------
+    |
+    | First try to find an existing course with the same name and phase.
+    |
+    */
 
-        $traineeStmt = $db->prepare("
-            SELECT id
-            FROM public.trainees
-            WHERE id = :trainee_id
-              AND user_id = :user_id
-            LIMIT 1
+    $courseStmt = $db->prepare("
+        SELECT *
+        FROM public.courses
+        WHERE LOWER(course_name) = LOWER(:course_name)
+          AND phase = :phase
+        LIMIT 1
+    ");
+
+    $courseStmt->execute([
+        ':course_name' => $courseName,
+        ':phase' => $coursePhase
+    ]);
+
+    $course = $courseStmt->fetch(PDO::FETCH_ASSOC);
+
+    /*
+    |--------------------------------------------------------------------------
+    | Create course if it doesn't exist
+    |--------------------------------------------------------------------------
+    */
+
+    if (!$course) {
+
+        /*
+         * Generate a course code.
+         *
+         * Example:
+         * MATTA-TRAINING-A1B2C3D4
+         */
+
+        $courseCode =
+            'MATTA-TRAINING-' .
+            strtoupper(bin2hex(random_bytes(4)));
+
+        $createCourseStmt = $db->prepare("
+            INSERT INTO public.courses (
+                course_code,
+                course_name,
+                category,
+                phase,
+                hours,
+                instructor,
+                description,
+                is_active,
+                created_at,
+                updated_at
+            )
+            VALUES (
+                :course_code,
+                :course_name,
+                :category,
+                :phase,
+                :hours,
+                :instructor,
+                NULL,
+                TRUE,
+                NOW(),
+                NOW()
+            )
+            RETURNING *
         ");
 
-        $traineeStmt->execute([
-            ':trainee_id' => $traineeId,
-            ':user_id' => $userId
+        $createCourseStmt->execute([
+            ':course_code' => $courseCode,
+            ':course_name' => $courseName,
+            ':category' => $courseCategory !== ''
+                ? $courseCategory
+                : null,
+            ':phase' => $coursePhase,
+            ':hours' => $hours,
+            ':instructor' => $courseInstructor !== ''
+                ? $courseInstructor
+                : null
         ]);
 
-        $authorized = (bool) $traineeStmt->fetch(PDO::FETCH_ASSOC);
+        $course = $createCourseStmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$course) {
+            json_response([
+                'error' => 'Failed to create course'
+            ], 500);
+        }
+
+    } else {
+
+        /*
+         * Use the existing course.
+         */
+
+        /*
+         * Keep the catalog information up to date if the
+         * user supplied instructor/category information.
+         */
+
+        $updates = [];
+        $params = [
+            ':course_id' => $course['id']
+        ];
+
+        if (
+            $courseInstructor !== '' &&
+            empty($course['instructor'])
+        ) {
+            $updates[] = 'instructor = :instructor';
+            $params[':instructor'] = $courseInstructor;
+        }
+
+        if (
+            $courseCategory !== '' &&
+            empty($course['category'])
+        ) {
+            $updates[] = 'category = :category';
+            $params[':category'] = $courseCategory;
+        }
+
+        if (!empty($updates)) {
+
+            $updates[] = 'updated_at = NOW()';
+
+            $updateCourseStmt = $db->prepare("
+                UPDATE public.courses
+                SET " . implode(', ', $updates) . "
+                WHERE id = :course_id
+            ");
+
+            $updateCourseStmt->execute($params);
+
+            /*
+             * Reload the course after updating.
+             */
+
+            $reloadCourseStmt = $db->prepare("
+                SELECT *
+                FROM public.courses
+                WHERE id = :course_id
+                LIMIT 1
+            ");
+
+            $reloadCourseStmt->execute([
+                ':course_id' => $course['id']
+            ]);
+
+            $course = $reloadCourseStmt->fetch(PDO::FETCH_ASSOC);
+        }
     }
 
-    if (!$authorized) {
-        json_response([
-            'error' => 'Forbidden',
-            'message' => 'You are not authorized to create a training record for this trainee.'
-        ], 403);
+    $courseId = $course['id'];
+
+    /*
+    |--------------------------------------------------------------------------
+    | Completion status
+    |--------------------------------------------------------------------------
+    */
+
+    $completionStatus =
+        $input['completion_status'] ??
+        null;
+
+    if (
+        $completionStatus === ''
+    ) {
+        $completionStatus = null;
     }
 
     /*
-     * Verify trainee exists.
-     */
-    $stmt = $db->prepare("
-        SELECT id
-        FROM public.trainees
-        WHERE id = :trainee_id
-        LIMIT 1
-    ");
+    |--------------------------------------------------------------------------
+    | Insert training record
+    |--------------------------------------------------------------------------
+    */
 
-    $stmt->execute([
-        ':trainee_id' => $traineeId
-    ]);
-
-    if (!$stmt->fetch(PDO::FETCH_ASSOC)) {
-        json_response([
-            'error' => 'Trainee not found'
-        ], 404);
-    }
-
-    /*
-     * Verify course exists.
-     */
-    $stmt = $db->prepare("
-        SELECT id
-        FROM public.courses
-        WHERE id = :course_id
-        LIMIT 1
-    ");
-
-    $stmt->execute([
-        ':course_id' => $courseId
-    ]);
-
-    if (!$stmt->fetch(PDO::FETCH_ASSOC)) {
-        json_response([
-            'error' => 'Course not found'
-        ], 404);
-    }
-
-    /*
-     * Create training record.
-     */
-    $stmt = $db->prepare("
+    $recordStmt = $db->prepare("
         INSERT INTO public.training_records (
             trainee_id,
             course_id,
@@ -254,7 +493,7 @@ try {
         RETURNING *
     ");
 
-    $stmt->execute([
+    $recordStmt->execute([
         ':trainee_id' => $traineeId,
         ':course_id' => $courseId,
         ':attendance_date' => $attendanceDate,
@@ -265,10 +504,26 @@ try {
         ':hours' => $hours
     ]);
 
-    $record = $stmt->fetch(PDO::FETCH_ASSOC);
+    $record = $recordStmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$record) {
+        json_response([
+            'error' => 'Failed to create training record'
+        ], 500);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Return result
+    |--------------------------------------------------------------------------
+    */
 
     json_response([
-        'data' => $record
+        'data' => [
+            'record' => $record,
+            'course' => $course,
+            'trainee_id' => $traineeId
+        ]
     ], 201);
 
 } catch (Throwable $e) {
