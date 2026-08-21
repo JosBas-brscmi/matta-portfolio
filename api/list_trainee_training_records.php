@@ -1,3 +1,4 @@
+
 <?php
 
 header('Content-Type: application/json');
@@ -17,7 +18,12 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 function json_response($data, int $status = 200): void
 {
     http_response_code($status);
-    echo json_encode($data);
+
+    echo json_encode(
+        $data,
+        JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+    );
+
     exit;
 }
 
@@ -60,8 +66,11 @@ try {
     $db = get_db();
 
     /*
-     * Get the logged-in user's role.
-     */
+    |--------------------------------------------------------------------------
+    | Get logged-in user's role
+    |--------------------------------------------------------------------------
+    */
+
     $roleStmt = $db->prepare("
         SELECT role
         FROM public.users_profile
@@ -78,9 +87,17 @@ try {
     $role = strtolower(trim($profile['role'] ?? ''));
 
     /*
-     * Administrative/staff users may view any trainee.
-     */
+    |--------------------------------------------------------------------------
+    | Privileged users
+    |--------------------------------------------------------------------------
+    |
+    | These users can view training records belonging to any trainee.
+    |
+    */
+
     $privilegedRoles = [
+        'owner',
+        'ma_center',
         'admin',
         'administrator',
         'staff',
@@ -92,8 +109,15 @@ try {
     $authorized = in_array($role, $privilegedRoles, true);
 
     /*
-     * A normal trainee may only view their own records.
-     */
+    |--------------------------------------------------------------------------
+    | Normal trainee authorization
+    |--------------------------------------------------------------------------
+    |
+    | If the logged-in user is not privileged, they can only
+    | view their own trainee record.
+    |
+    */
+
     if (!$authorized) {
 
         $traineeStmt = $db->prepare("
@@ -112,7 +136,14 @@ try {
         $authorized = (bool) $traineeStmt->fetch(PDO::FETCH_ASSOC);
     }
 
+    /*
+    |--------------------------------------------------------------------------
+    | Authorization failed
+    |--------------------------------------------------------------------------
+    */
+
     if (!$authorized) {
+
         json_response([
             'error' => 'Forbidden',
             'message' => 'You are not authorized to view this trainee.'
@@ -120,8 +151,11 @@ try {
     }
 
     /*
-     * Fetch training records.
-     */
+    |--------------------------------------------------------------------------
+    | Fetch training records
+    |--------------------------------------------------------------------------
+    */
+
     $stmt = $db->prepare("
         SELECT
             tr.id,
@@ -136,10 +170,17 @@ try {
             tr.created_at,
             tr.updated_at,
 
+            c.id AS c_id,
             c.course_code,
             c.course_name,
             c.category,
-            c.phase
+            c.phase,
+            c.hours AS course_hours,
+            c.instructor,
+            c.description,
+            c.is_active,
+            c.created_at AS course_created_at,
+            c.updated_at AS course_updated_at
 
         FROM public.training_records tr
 
@@ -149,7 +190,7 @@ try {
         WHERE tr.trainee_id = :trainee_id
 
         ORDER BY
-            tr.attendance_date DESC NULLS LAST,
+            tr.attendance_date DESC,
             tr.created_at DESC
     ");
 
@@ -157,11 +198,70 @@ try {
         ':trainee_id' => $traineeId
     ]);
 
-    $records = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    /*
+    |--------------------------------------------------------------------------
+    | Build response
+    |--------------------------------------------------------------------------
+    |
+    | The frontend expects each training record to contain:
+    |
+    | record.course.course_name
+    | record.course.phase
+    | record.course.category
+    | record.course.instructor
+    |
+    */
+
+    $records = [];
+
+    foreach ($rows as $row) {
+
+        $course = null;
+
+        if (!empty($row['c_id'])) {
+
+            $course = [
+                'id' => $row['c_id'],
+                'course_code' => $row['course_code'],
+                'course_name' => $row['course_name'],
+                'category' => $row['category'],
+                'phase' => $row['phase'],
+                'hours' => $row['course_hours'],
+                'instructor' => $row['instructor'],
+                'description' => $row['description'],
+                'is_active' => $row['is_active'],
+                'created_at' => $row['course_created_at'],
+                'updated_at' => $row['course_updated_at']
+            ];
+        }
+
+        $records[] = [
+            'id' => $row['id'],
+            'trainee_id' => $row['trainee_id'],
+            'course_id' => $row['course_id'],
+            'attendance_date' => $row['attendance_date'],
+            'attended' => (bool) $row['attended'],
+            'test_score' => $row['test_score'],
+            'reflection' => $row['reflection'],
+            'completion_status' => $row['completion_status'],
+            'hours' => $row['hours'],
+            'created_at' => $row['created_at'],
+            'updated_at' => $row['updated_at'],
+            'course' => $course
+        ];
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Return response
+    |--------------------------------------------------------------------------
+    */
 
     json_response([
         'data' => $records
-    ]);
+    ], 200);
 
 } catch (Throwable $e) {
 
