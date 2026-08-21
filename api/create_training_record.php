@@ -14,6 +14,22 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 |--------------------------------------------------------------------------
 */
 
+function generate_uuid(): string
+{
+    $data = random_bytes(16);
+
+    $data[6] = chr((ord($data[6]) & 0x0f) | 0x40);
+    $data[8] = chr((ord($data[8]) & 0x3f) | 0x80);
+
+    return vsprintf(
+        '%s%s-%s-%s-%s-%s%s%s',
+        str_split(bin2hex($data), 4)
+    );
+}
+
+$courseId = generate_uuid();
+
+
 function json_response($data, int $status = 200): void
 {
     http_response_code($status);
@@ -142,7 +158,6 @@ if (array_key_exists('attended', $input)) {
     if (is_bool($input['attended'])) {
 
         $attended = $input['attended'];
-
     } else {
 
         $parsedAttended = filter_var(
@@ -328,48 +343,53 @@ try {
 
     if (!$course) {
 
+        $courseId = generate_uuid();
+
         $courseCode =
             'MATTA-' .
             strtoupper(bin2hex(random_bytes(5)));
 
         $courseInsert = $db->prepare("
-            INSERT INTO public.courses (
-                course_code,
-                course_name,
-                category,
-                phase,
-                hours,
-                instructor,
-                is_active,
-                created_at,
-                updated_at
-            )
-            VALUES (
-                :course_code,
-                :course_name,
-                :category,
-                :phase,
-                :hours,
-                :instructor,
-                :is_active,
-                NOW(),
-                NOW()
-            )
-            RETURNING
-                id,
-                course_code,
-                course_name,
-                category,
-                phase,
-                hours,
-                instructor,
-                applicable_departments,
-                is_active,
-                created_at,
-                updated_at
-        ");
+        INSERT INTO public.courses (
+            id,
+            course_code,
+            course_name,
+            category,
+            phase,
+            hours,
+            instructor,
+            is_active,
+            created_at,
+            updated_at
+        )
+        VALUES (
+            :id,
+            :course_code,
+            :course_name,
+            :category,
+            :phase,
+            :hours,
+            :instructor,
+            :is_active,
+            NOW(),
+            NOW()
+        )
+        RETURNING
+            id,
+            course_code,
+            course_name,
+            category,
+            phase,
+            hours,
+            instructor,
+            applicable_departments,
+            is_active,
+            created_at,
+            updated_at
+    ");
 
         $courseInsert->execute([
+            ':id' => $courseId,
             ':course_code' => $courseCode,
             ':course_name' => $courseName,
             ':category' => $courseCategory,
@@ -396,41 +416,46 @@ try {
     |--------------------------------------------------------------------------
     */
 
-    $recordStmt = $db->prepare("
-        INSERT INTO public.training_records (
-            trainee_id,
-            course_id,
-            attendance_date,
-            attended,
-            test_score,
-            reflection,
-            hours,
-            created_at,
-            updated_at
-        )
-        VALUES (
-            :trainee_id,
-            :course_id,
-            :attendance_date,
-            :attended,
-            :test_score,
-            :reflection,
-            :hours,
-            NOW(),
-            NOW()
-        )
-        RETURNING *
-    ");
+    $recordId = generate_uuid();
 
-    $recordStmt->execute([
-        ':trainee_id' => $traineeId,
-        ':course_id' => $courseId,
-        ':attendance_date' => $attendanceDate,
-        ':attended' => $attended,
-        ':test_score' => $testScore,
-        ':reflection' => $reflection,
-        ':hours' => $hours
-    ]);
+    $recordStmt = $db->prepare("
+    INSERT INTO public.training_records (
+        id,
+        trainee_id,
+        course_id,
+        attendance_date,
+        attended,
+        test_score,
+        reflection,
+        hours,
+        created_at,
+        updated_at
+    )
+    VALUES (
+        :id,
+        :trainee_id,
+        :course_id,
+        :attendance_date,
+        :attended,
+        :test_score,
+        :reflection,
+        :hours,
+        NOW(),
+        NOW()
+    )
+    RETURNING *
+");
+
+$recordStmt->execute([
+    ':id' => $recordId,
+    ':trainee_id' => $traineeId,
+    ':course_id' => $courseId,
+    ':attendance_date' => $attendanceDate,
+    ':attended' => $attended,
+    ':test_score' => $testScore,
+    ':reflection' => $reflection,
+    ':hours' => $hours
+]);
 
     $record = $recordStmt->fetch(PDO::FETCH_ASSOC);
 
@@ -454,12 +479,11 @@ try {
             ]
         )
     ], 201);
-
 } catch (Throwable $e) {
 
     error_log(
         'create_training_record.php: ' .
-        $e->getMessage()
+            $e->getMessage()
     );
 
     json_response([
