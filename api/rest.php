@@ -1,3 +1,4 @@
+
 <?php
 
 header('Content-Type: application/json');
@@ -5,10 +6,10 @@ header('Content-Type: application/json');
 require_once __DIR__ . '/config.php';
 
 /*
- * --------------------------------------------------------------------------
- * Debug logging
- * --------------------------------------------------------------------------
- */
+|--------------------------------------------------------------------------
+| Debug logging
+|--------------------------------------------------------------------------
+*/
 
 $rawBody = file_get_contents('php://input');
 
@@ -24,11 +25,11 @@ $raw = [
 
 @file_put_contents(
     __DIR__ . '/last_request.log',
-    json_encode($raw) . PHP_EOL,
+    json_encode($raw, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . PHP_EOL,
     FILE_APPEND
 );
 
-$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+$method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 
 $table = $_GET['table'] ?? null;
 
@@ -45,91 +46,86 @@ if (
     exit;
 }
 
-$pdo = get_db();
+try {
+    $pdo = get_db();
 
+    /*
+    |--------------------------------------------------------------------------
+    | Helpers
+    |--------------------------------------------------------------------------
+    */
 
-/*
- * --------------------------------------------------------------------------
- * Helpers
- * --------------------------------------------------------------------------
- */
+    function json_response($data, int $status = 200): void
+    {
+        http_response_code($status);
 
-function get_json_body(): array
-{
-    $raw = file_get_contents('php://input');
-
-    if (!$raw) {
-        return [];
-    }
-
-    $data = json_decode($raw, true);
-
-    if (!is_array($data)) {
-        http_response_code(400);
-
-        echo json_encode([
-            'error' => 'Invalid JSON body',
-        ]);
+        echo json_encode(
+            $data,
+            JSON_UNESCAPED_UNICODE |
+            JSON_UNESCAPED_SLASHES
+        );
 
         exit;
     }
 
-    return $data;
-}
+
+    function get_json_body(): array
+    {
+        $raw = file_get_contents('php://input');
+
+        if ($raw === false || trim($raw) === '') {
+            return [];
+        }
+
+        $data = json_decode($raw, true);
+
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            json_response([
+                'error' => 'Invalid JSON body',
+                'detail' => json_last_error_msg(),
+            ], 400);
+        }
+
+        if (!is_array($data)) {
+            json_response([
+                'error' => 'JSON body must be an object',
+            ], 400);
+        }
+
+        return $data;
+    }
 
 
-function validate_column_name(string $column): bool
-{
-    return (bool) preg_match(
-        '/^[a-zA-Z0-9_]+$/',
-        $column
-    );
-}
+    function validate_column_name(string $column): bool
+    {
+        return (bool) preg_match(
+            '/^[a-zA-Z0-9_]+$/',
+            $column
+        );
+    }
 
-
-/*
- * --------------------------------------------------------------------------
- * Main request
- * --------------------------------------------------------------------------
- */
-
-try {
 
     /*
-     * ======================================================================
-     * GET
-     * ======================================================================
-     */
+    |--------------------------------------------------------------------------
+    | GET
+    |--------------------------------------------------------------------------
+    */
 
     if ($method === 'GET') {
 
         $select = $_GET['select'] ?? '*';
 
-
         /*
-         * --------------------------------------------------------------
-         * Special handling for portfolio_items -> portfolio_files
-         * --------------------------------------------------------------
-         */
+        |--------------------------------------------------------------------------
+        | Special handling for portfolio_items -> portfolio_files
+        |--------------------------------------------------------------------------
+        */
 
         $isPortfolioNestedSelect =
             $table === 'portfolio_items' &&
             stripos($select, 'portfolio_files') !== false;
 
-        $nestedFiles = [];
-
-
         if ($isPortfolioNestedSelect) {
-
-            /*
-             * Remove the nested portfolio_files(...) portion.
-             *
-             * Example:
-             *
-             * id,
-             * title,
-             * portfolio_files(id,file_name,storage_path)
-             */
 
             $selectWithoutFiles = preg_replace(
                 '/,\s*portfolio_files\s*\((.*?)\)/is',
@@ -137,11 +133,9 @@ try {
                 $select
             );
 
-            if ($selectWithoutFiles === null) {
-                $selectWithoutFiles = $select;
+            if ($selectWithoutFiles !== null) {
+                $select = trim($selectWithoutFiles);
             }
-
-            $select = trim($selectWithoutFiles);
 
             $select = rtrim(
                 $select,
@@ -155,8 +149,10 @@ try {
 
 
         /*
-         * Basic protection for SELECT.
-         */
+        |--------------------------------------------------------------------------
+        | Validate SELECT
+        |--------------------------------------------------------------------------
+        */
 
         if (
             !preg_match(
@@ -164,15 +160,17 @@ try {
                 $select
             )
         ) {
-            http_response_code(400);
-
-            echo json_encode([
+            json_response([
                 'error' => 'Invalid select parameter',
-            ]);
-
-            exit;
+            ], 400);
         }
 
+
+        /*
+        |--------------------------------------------------------------------------
+        | Build SELECT
+        |--------------------------------------------------------------------------
+        */
 
         $sql =
             'SELECT ' .
@@ -183,8 +181,10 @@ try {
 
 
         /*
-         * WHERE eq_* filters
-         */
+        |--------------------------------------------------------------------------
+        | WHERE eq_* filters
+        |--------------------------------------------------------------------------
+        */
 
         $where = [];
 
@@ -196,21 +196,21 @@ try {
 
                 $column = substr($key, 3);
 
-                if (
-                    validate_column_name($column)
-                ) {
-
-                    $placeholder =
-                        ':eq_' . $column;
-
-                    $where[] =
-                        '"' .
-                        $column .
-                        '" = ' .
-                        $placeholder;
-
-                    $params[$placeholder] = $value;
+                if (!validate_column_name($column)) {
+                    continue;
                 }
+
+                $placeholder =
+                    ':eq_' .
+                    $column;
+
+                $where[] =
+                    '"' .
+                    $column .
+                    '" = ' .
+                    $placeholder;
+
+                $params[$placeholder] = $value;
             }
         }
 
@@ -224,8 +224,10 @@ try {
 
 
         /*
-         * ORDER BY
-         */
+        |--------------------------------------------------------------------------
+        | ORDER BY
+        |--------------------------------------------------------------------------
+        */
 
         if (!empty($_GET['order'])) {
 
@@ -244,6 +246,12 @@ try {
         }
 
 
+        /*
+        |--------------------------------------------------------------------------
+        | Execute SELECT
+        |--------------------------------------------------------------------------
+        */
+
         $stmt = $pdo->prepare($sql);
 
         $stmt->execute($params);
@@ -254,10 +262,10 @@ try {
 
 
         /*
-         * --------------------------------------------------------------
-         * Load portfolio_files
-         * --------------------------------------------------------------
-         */
+        |--------------------------------------------------------------------------
+        | Portfolio nested files
+        |--------------------------------------------------------------------------
+        */
 
         if (
             $isPortfolioNestedSelect &&
@@ -270,11 +278,9 @@ try {
                     'id'
                 );
 
-
             $placeholders = [];
 
             $fileParams = [];
-
 
             foreach (
                 $portfolioItemIds
@@ -293,127 +299,118 @@ try {
             }
 
 
-            $fileSql = '
-                SELECT
-                    id,
-                    portfolio_item_id,
-                    file_name,
-                    file_type,
-                    file_size_bytes,
-                    storage_path,
-                    uploaded_at
-                FROM "public"."portfolio_files"
-                WHERE portfolio_item_id IN (' .
-                implode(
-                    ',',
-                    $placeholders
-                ) .
-                ')
-                ORDER BY uploaded_at
-            ';
+            if (!empty($placeholders)) {
+
+                $fileSql = '
+                    SELECT
+                        id,
+                        portfolio_item_id,
+                        file_name,
+                        file_type,
+                        file_size_bytes,
+                        storage_path,
+                        uploaded_at
+                    FROM "public"."portfolio_files"
+                    WHERE portfolio_item_id IN (' .
+                    implode(
+                        ',',
+                        $placeholders
+                    ) .
+                    ')
+                    ORDER BY uploaded_at
+                ';
 
 
-            $fileStmt =
-                $pdo->prepare($fileSql);
+                $fileStmt =
+                    $pdo->prepare($fileSql);
 
-
-            foreach (
-                $fileParams
-                as $placeholder => $value
-            ) {
-
-                $fileStmt->bindValue(
-                    $placeholder,
-                    $value
-                );
-            }
-
-
-            $fileStmt->execute();
-
-
-            $files =
-                $fileStmt->fetchAll(
-                    PDO::FETCH_ASSOC
+                $fileStmt->execute(
+                    $fileParams
                 );
 
 
-            $filesByPortfolioItem = [];
+                $files =
+                    $fileStmt->fetchAll(
+                        PDO::FETCH_ASSOC
+                    );
 
 
-            foreach ($files as $file) {
+                $filesByPortfolioItem = [];
 
-                $itemId =
-                    $file['portfolio_item_id'];
 
-                if (
-                    !isset(
+                foreach ($files as $file) {
+
+                    $itemId =
+                        $file['portfolio_item_id'];
+
+                    if (
+                        !isset(
+                            $filesByPortfolioItem[
+                                $itemId
+                            ]
+                        )
+                    ) {
                         $filesByPortfolioItem[
                             $itemId
-                        ]
-                    )
-                ) {
+                        ] = [];
+                    }
+
 
                     $filesByPortfolioItem[
                         $itemId
-                    ] = [];
+                    ][] = $file;
                 }
 
 
-                $filesByPortfolioItem[
-                    $itemId
-                ][] = $file;
+                foreach ($rows as &$row) {
+
+                    $itemId =
+                        $row['id'];
+
+                    $row['portfolio_files'] =
+                        $filesByPortfolioItem[
+                            $itemId
+                        ] ?? [];
+                }
+
+                unset($row);
             }
-
-
-            foreach ($rows as &$row) {
-
-                $itemId =
-                    $row['id'];
-
-                $row['portfolio_files'] =
-                    $filesByPortfolioItem[
-                        $itemId
-                    ] ?? [];
-            }
-
-            unset($row);
         }
 
 
         /*
-         * Return GET result.
-         */
+        |--------------------------------------------------------------------------
+        | GET response
+        |--------------------------------------------------------------------------
+        */
 
         if (!empty($_GET['single'])) {
 
-            echo json_encode([
+            json_response([
                 'data' =>
                     $rows[0] ?? null,
             ]);
 
         } else {
 
-            echo json_encode([
+            json_response([
                 'data' => $rows,
             ]);
         }
-
-        exit;
     }
 
 
     /*
-     * ======================================================================
-     * POST
-     * ======================================================================
-     *
-     * Used by:
-     *
-     * .from('table')
-     * .insert(...)
-     *
-     */
+    |--------------------------------------------------------------------------
+    | POST
+    |--------------------------------------------------------------------------
+    |
+    | Used by:
+    |
+    | .from('table')
+    | .insert(...)
+    |
+    */
 
     if ($method === 'POST') {
 
@@ -421,13 +418,9 @@ try {
 
         if (empty($body)) {
 
-            http_response_code(400);
-
-            echo json_encode([
+            json_response([
                 'error' => 'Empty request body',
-            ]);
-
-            exit;
+            ], 400);
         }
 
 
@@ -437,25 +430,35 @@ try {
 
         $params = [];
 
-
         foreach ($body as $column => $value) {
 
-            if (
-                !validate_column_name($column)
-            ) {
+            if (!validate_column_name($column)) {
                 continue;
             }
 
 
+            /*
+             * Do not manually insert the ID when the database
+             * provides a default UUID.
+             *
+             * If an ID was explicitly supplied, however,
+             * allow it.
+             */
+
             $columns[] =
-                '"' . $column . '"';
+                '"' .
+                $column .
+                '"';
+
 
             $placeholder =
                 ':insert_' .
                 count($params);
 
+
             $placeholders[] =
                 $placeholder;
+
 
             $params[$placeholder] =
                 $value;
@@ -464,16 +467,22 @@ try {
 
         if (empty($columns)) {
 
-            http_response_code(400);
-
-            echo json_encode([
+            json_response([
                 'error' =>
                     'No valid columns supplied',
-            ]);
-
-            exit;
+            ], 400);
         }
 
+
+        /*
+        |--------------------------------------------------------------------------
+        | IMPORTANT:
+        |
+        | PostgreSQL supports RETURNING directly on the INSERT.
+        |
+        | We MUST NOT execute the INSERT twice.
+        |--------------------------------------------------------------------------
+        */
 
         $sql =
             'INSERT INTO "public"."' .
@@ -482,69 +491,61 @@ try {
             implode(',', $columns) .
             ') VALUES (' .
             implode(',', $placeholders) .
-            ')';
+            ') RETURNING *';
 
+
+        /*
+        |--------------------------------------------------------------------------
+        | Execute INSERT ONCE
+        |--------------------------------------------------------------------------
+        */
 
         $stmt =
             $pdo->prepare($sql);
 
-        $stmt->execute($params);
+
+        $stmt->execute(
+            $params
+        );
 
 
         /*
-         * Try to return inserted row.
-         *
-         * PostgreSQL supports RETURNING.
-         */
+        |--------------------------------------------------------------------------
+        | Get inserted row
+        |--------------------------------------------------------------------------
+        */
 
-        $returningSql =
-            $sql .
-            ' RETURNING *';
-
-
-        try {
-
-            $returningStmt =
-                $pdo->prepare(
-                    $returningSql
-                );
-
-            $returningStmt->execute(
-                $params
+        $inserted =
+            $stmt->fetch(
+                PDO::FETCH_ASSOC
             );
 
-            $inserted =
-                $returningStmt->fetch(
-                    PDO::FETCH_ASSOC
-                );
 
-        } catch (Exception $returnError) {
+        /*
+        |--------------------------------------------------------------------------
+        | Response
+        |--------------------------------------------------------------------------
+        */
 
-            $inserted = null;
-        }
-
-
-        echo json_encode([
+        json_response([
             'data' =>
-                $inserted,
-        ]);
-
-        exit;
+                $inserted ?: null,
+        ], 201);
     }
 
 
     /*
-     * ======================================================================
-     * PUT
-     * ======================================================================
-     *
-     * Used by:
-     *
-     * .from('users_profile')
-     * .update(...)
-     * .eq('id', userId)
-     *
-     */
+    |--------------------------------------------------------------------------
+    | PUT
+    |--------------------------------------------------------------------------
+    |
+    | Used by:
+    |
+    | .from('users_profile')
+    | .update(...)
+    | .eq('id', userId)
+    |
+    */
 
     if ($method === 'PUT') {
 
@@ -552,30 +553,21 @@ try {
 
         if (!$id) {
 
-            http_response_code(400);
-
-            echo json_encode([
+            json_response([
                 'error' =>
                     'Missing id for update',
-            ]);
-
-            exit;
+            ], 400);
         }
 
 
         $body = get_json_body();
 
-
         if (empty($body)) {
 
-            http_response_code(400);
-
-            echo json_encode([
+            json_response([
                 'error' =>
                     'Empty update body',
-            ]);
-
-            exit;
+            ], 400);
         }
 
 
@@ -589,19 +581,15 @@ try {
         foreach ($body as $column => $value) {
 
             /*
-             * Never allow an ID update.
+             * Never allow ID updates.
              */
 
-            if (
-                $column === 'id'
-            ) {
+            if ($column === 'id') {
                 continue;
             }
 
 
-            if (
-                !validate_column_name($column)
-            ) {
+            if (!validate_column_name($column)) {
                 continue;
             }
 
@@ -625,14 +613,10 @@ try {
 
         if (empty($set)) {
 
-            http_response_code(400);
-
-            echo json_encode([
+            json_response([
                 'error' =>
                     'No valid fields supplied for update',
-            ]);
-
-            exit;
+            ], 400);
         }
 
 
@@ -641,61 +625,44 @@ try {
             $table .
             '" SET ' .
             implode(',', $set) .
-            ' WHERE "id" = :update_id';
+            ' WHERE "id" = :update_id ' .
+            ' RETURNING *';
 
 
         $stmt =
             $pdo->prepare($sql);
 
-        $stmt->execute($params);
 
-
-        /*
-         * Return updated row.
-         */
-
-        $selectSql =
-            'SELECT * FROM "public"."' .
-            $table .
-            '" WHERE "id" = :select_id';
-
-
-        $selectStmt =
-            $pdo->prepare($selectSql);
-
-
-        $selectStmt->execute([
-            ':select_id' => $id,
-        ]);
+        $stmt->execute(
+            $params
+        );
 
 
         $updated =
-            $selectStmt->fetch(
+            $stmt->fetch(
                 PDO::FETCH_ASSOC
             );
 
 
-        echo json_encode([
+        json_response([
             'data' =>
                 $updated ?: null,
         ]);
-
-        exit;
     }
 
 
     /*
-     * ======================================================================
-     * DELETE
-     * ======================================================================
-     *
-     * Used by:
-     *
-     * .from('table')
-     * .delete()
-     * .eq('id', id)
-     *
-     */
+    |--------------------------------------------------------------------------
+    | DELETE
+    |--------------------------------------------------------------------------
+    |
+    | Used by:
+    |
+    | .from('table')
+    | .delete()
+    | .eq('id', id)
+    |
+    */
 
     if ($method === 'DELETE') {
 
@@ -703,14 +670,10 @@ try {
 
         if (!$id) {
 
-            http_response_code(400);
-
-            echo json_encode([
+            json_response([
                 'error' =>
                     'Missing id for delete',
-            ]);
-
-            exit;
+            ], 400);
         }
 
 
@@ -729,65 +692,75 @@ try {
         ]);
 
 
-        echo json_encode([
+        json_response([
             'data' => null,
         ]);
-
-        exit;
     }
 
 
     /*
-     * ======================================================================
-     * Unsupported method
-     * ======================================================================
-     */
+    |--------------------------------------------------------------------------
+    | Unsupported method
+    |--------------------------------------------------------------------------
+    */
 
-    http_response_code(405);
-
-    echo json_encode([
+    json_response([
         'error' => 'Method not allowed',
         'method' => $method,
-    ]);
+    ], 405);
 
-} catch (Throwable $e) {
 
-    http_response_code(500);
+} catch (PDOException $e) {
 
+    /*
+    |--------------------------------------------------------------------------
+    | PostgreSQL / PDO error
+    |--------------------------------------------------------------------------
+    */
 
     $log =
         '[' .
         date('c') .
-        '] QUERY_ERROR: ' .
+        '] PDO_ERROR' .
+        PHP_EOL;
+
+    $log .=
+        'MESSAGE: ' .
         $e->getMessage() .
         PHP_EOL;
 
+    $log .=
+        'CODE: ' .
+        $e->getCode() .
+        PHP_EOL;
 
     $log .=
         'METHOD: ' .
         $method .
         PHP_EOL;
 
+    $log .=
+        'TABLE: ' .
+        $table .
+        PHP_EOL;
 
     $log .=
         'GET: ' .
         json_encode($_GET) .
         PHP_EOL;
 
-
     $log .=
         'BODY: ' .
         $rawBody .
         PHP_EOL;
 
+    $log .=
+        'TRACE: ' .
+        $e->getTraceAsString() .
+        PHP_EOL;
 
     $log .=
-        $e->getTraceAsString() .
-        PHP_EOL .
-        str_repeat(
-            '-',
-            80
-        ) .
+        str_repeat('-', 80) .
         PHP_EOL;
 
 
@@ -798,11 +771,83 @@ try {
     );
 
 
-    echo json_encode([
-        'error' =>
-            'query_failed',
+    http_response_code(500);
 
+    echo json_encode([
+        'error' => 'query_failed',
+
+        /*
+         * This is useful while debugging your local server.
+         */
         'detail' =>
             $e->getMessage(),
     ]);
+
+    exit;
+
+
+} catch (Throwable $e) {
+
+    /*
+    |--------------------------------------------------------------------------
+    | General error
+    |--------------------------------------------------------------------------
+    */
+
+    $log =
+        '[' .
+        date('c') .
+        '] GENERAL_ERROR' .
+        PHP_EOL;
+
+    $log .=
+        'MESSAGE: ' .
+        $e->getMessage() .
+        PHP_EOL;
+
+    $log .=
+        'METHOD: ' .
+        $method .
+        PHP_EOL;
+
+    $log .=
+        'TABLE: ' .
+        $table .
+        PHP_EOL;
+
+    $log .=
+        'GET: ' .
+        json_encode($_GET) .
+        PHP_EOL;
+
+    $log .=
+        'BODY: ' .
+        $rawBody .
+        PHP_EOL;
+
+    $log .=
+        $e->getTraceAsString() .
+        PHP_EOL;
+
+    $log .=
+        str_repeat('-', 80) .
+        PHP_EOL;
+
+
+    @file_put_contents(
+        __DIR__ . '/error.log',
+        $log,
+        FILE_APPEND
+    );
+
+
+    http_response_code(500);
+
+    echo json_encode([
+        'error' => 'query_failed',
+        'detail' => $e->getMessage(),
+    ]);
+
+    exit;
 }
+
