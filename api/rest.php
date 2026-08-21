@@ -1,37 +1,58 @@
 
 <?php
 
-header('Content-Type: application/json');
+declare(strict_types=1);
+
+header('Content-Type: application/json; charset=utf-8');
 
 require_once __DIR__ . '/config.php';
 
 /*
 |--------------------------------------------------------------------------
-| Debug logging
+| Request information
 |--------------------------------------------------------------------------
 */
 
+$method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
+$table  = $_GET['table'] ?? null;
+
 $rawBody = file_get_contents('php://input');
 
+if ($rawBody === false) {
+    $rawBody = '';
+}
+
+/*
+|--------------------------------------------------------------------------
+| Debug request logging
+|--------------------------------------------------------------------------
+*/
+
 $raw = [
-    'time' => date('c'),
-    'method' => $_SERVER['REQUEST_METHOD'] ?? '',
-    'get' => $_GET,
+    'time'    => date('c'),
+    'method'  => $method,
+    'get'     => $_GET,
     'headers' => function_exists('getallheaders')
         ? getallheaders()
         : [],
-    'body' => $rawBody,
+    'body'    => $rawBody,
 ];
 
 @file_put_contents(
     __DIR__ . '/last_request.log',
-    json_encode($raw, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . PHP_EOL,
+    json_encode(
+        $raw,
+        JSON_UNESCAPED_UNICODE |
+        JSON_UNESCAPED_SLASHES
+    ) . PHP_EOL,
     FILE_APPEND
 );
 
-$method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
-
-$table = $_GET['table'] ?? null;
+/*
+|--------------------------------------------------------------------------
+| Validate table name
+|--------------------------------------------------------------------------
+*/
 
 if (
     !$table ||
@@ -46,62 +67,291 @@ if (
     exit;
 }
 
-try {
-    $pdo = get_db();
+/*
+|--------------------------------------------------------------------------
+| Helpers
+|--------------------------------------------------------------------------
+*/
+
+function json_response(
+    mixed $data,
+    int $status = 200
+): never {
+
+    http_response_code($status);
+
+    echo json_encode(
+        $data,
+        JSON_UNESCAPED_UNICODE |
+        JSON_UNESCAPED_SLASHES
+    );
+
+    exit;
+}
+
+
+function get_json_body(): array
+{
+    $raw = file_get_contents('php://input');
+
+    if ($raw === false || trim($raw) === '') {
+        return [];
+    }
+
+    $data = json_decode($raw, true);
+
+    if (json_last_error() !== JSON_ERROR_NONE) {
+
+        json_response([
+            'error'  => 'Invalid JSON body',
+            'detail' => json_last_error_msg(),
+        ], 400);
+    }
+
+    if (!is_array($data)) {
+
+        json_response([
+            'error' => 'JSON body must be an object',
+        ], 400);
+    }
+
+    return $data;
+}
+
+
+function validate_column_name(string $column): bool
+{
+    return (bool) preg_match(
+        '/^[a-zA-Z0-9_]+$/',
+        $column
+    );
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Validate a table against PostgreSQL
+|--------------------------------------------------------------------------
+|
+| This prevents arbitrary table access and also gives a clearer error
+| if the requested table does not exist.
+|
+*/
+
+function table_exists(PDO $pdo, string $table): bool
+{
+    $stmt = $pdo->prepare("
+        SELECT EXISTS (
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_schema = 'public'
+              AND table_name = :table
+        )
+    ");
+
+    $stmt->execute([
+        ':table' => $table,
+    ]);
+
+    return (bool) $stmt->fetchColumn();
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Quote a PostgreSQL identifier
+|--------------------------------------------------------------------------
+*/
+
+function quote_identifier(string $identifier): string
+{
+    if (!validate_column_name($identifier)) {
+        throw new RuntimeException(
+            "Invalid column name: {$identifier}"
+        );
+    }
+
+    return '"' . $identifier . '"';
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Parse Supabase-style order parameter
+|--------------------------------------------------------------------------
+|
+| Frontend sends:
+|
+| order=assessment_date.desc
+|
+| Supabase-style syntax:
+|
+| column.asc
+| column.desc
+|
+| We convert that to:
+|
+| ORDER BY "column" ASC
+| ORDER BY "column" DESC
+|
+*/
+
+function build_order_by(string $order): string
+{
+    $parts = array_filter(
+        array_map(
+            'trim',
+            explode(',', $order)
+        )
+    );
+
+    $orders = [];
+
+    foreach ($parts as $part) {
+
+        if ($part === '') {
+            continue;
+        }
+
+        $pieces = array_map(
+            'trim',
+            explode('.', $part)
+        );
+
+        $column = $pieces[0] ?? '';
+
+        if (!validate_column_name($column)) {
+            throw new RuntimeException(
+                "Invalid order column: {$column}"
+            );
+        }
+
+        $direction = 'ASC';
+
+        if (isset($pieces[1])) {
+
+            $requestedDirection =
+                strtolower($pieces[1]);
+
+            if (
+                $requestedDirection === 'desc'
+            ) {
+                $direction = 'DESC';
+
+            } elseif (
+                $requestedDirection === 'asc'
+            ) {
+                $direction = 'ASC';
+
+            } else {
+                throw new RuntimeException(
+                    "Invalid order direction: {$requestedDirection}"
+                );
+            }
+        }
+
+        $orders[] =
+            quote_identifier($column) .
+            ' ' .
+            $direction;
+    }
+
+    if (empty($orders)) {
+        return '';
+    }
+
+    return ' ORDER BY ' .
+        implode(', ', $orders);
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Remove nested portfolio_files(...) from SELECT
+|--------------------------------------------------------------------------
+*/
+
+function remove_portfolio_files_select(
+    string $select
+): string {
 
     /*
-    |--------------------------------------------------------------------------
-    | Helpers
-    |--------------------------------------------------------------------------
-    */
+     * Handles:
+     *
+     * portfolio_files (
+     *     id,
+     *     portfolio_item_id,
+     *     file_name,
+     *     ...
+     * )
+     */
 
-    function json_response($data, int $status = 200): void
-    {
-        http_response_code($status);
+    $pattern =
+        '/,\s*portfolio_files\s*\((?:[^()]|\([^()]*\))*\)/is';
 
-        echo json_encode(
-            $data,
-            JSON_UNESCAPED_UNICODE |
-            JSON_UNESCAPED_SLASHES
-        );
+    $result = preg_replace(
+        $pattern,
+        '',
+        $select
+    );
 
-        exit;
+    if ($result === null) {
+        return $select;
     }
 
+    $result = trim($result);
 
-    function get_json_body(): array
-    {
-        $raw = file_get_contents('php://input');
+    $result = rtrim(
+        $result,
+        " \t\n\r,"
+    );
 
-        if ($raw === false || trim($raw) === '') {
-            return [];
-        }
-
-        $data = json_decode($raw, true);
-
-        if (json_last_error() !== JSON_ERROR_NONE) {
-            json_response([
-                'error' => 'Invalid JSON body',
-                'detail' => json_last_error_msg(),
-            ], 400);
-        }
-
-        if (!is_array($data)) {
-            json_response([
-                'error' => 'JSON body must be an object',
-            ], 400);
-        }
-
-        return $data;
-    }
+    return $result !== ''
+        ? $result
+        : '*';
+}
 
 
-    function validate_column_name(string $column): bool
-    {
-        return (bool) preg_match(
-            '/^[a-zA-Z0-9_]+$/',
-            $column
-        );
+/*
+|--------------------------------------------------------------------------
+| Validate SELECT
+|--------------------------------------------------------------------------
+|
+| Supports ordinary column lists such as:
+|
+| id, trainee_id, title, created_at
+|
+| and aliases containing ':' used by Supabase-style selects.
+|
+*/
+
+function validate_select_string(
+    string $select
+): bool {
+
+    return (bool) preg_match(
+        '/^[a-zA-Z0-9_"\'\s,.*:]+$/',
+        $select
+    );
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Database connection
+|--------------------------------------------------------------------------
+*/
+
+try {
+
+    $pdo = get_db();
+
+    if (!table_exists($pdo, $table)) {
+
+        json_response([
+            'error'  => 'Table does not exist',
+            'table'  => $table,
+        ], 404);
     }
 
 
@@ -113,38 +363,31 @@ try {
 
     if ($method === 'GET') {
 
-        $select = $_GET['select'] ?? '*';
+        $select =
+            $_GET['select'] ?? '*';
 
         /*
-        |--------------------------------------------------------------------------
-        | Special handling for portfolio_items -> portfolio_files
-        |--------------------------------------------------------------------------
-        */
+         * portfolio_items can request:
+         *
+         * portfolio_files (...)
+         *
+         * This is not native SQL in our REST endpoint, so remove it
+         * from the main SELECT and load the files separately.
+         */
 
         $isPortfolioNestedSelect =
             $table === 'portfolio_items' &&
-            stripos($select, 'portfolio_files') !== false;
+            stripos(
+                $select,
+                'portfolio_files'
+            ) !== false;
 
         if ($isPortfolioNestedSelect) {
 
-            $selectWithoutFiles = preg_replace(
-                '/,\s*portfolio_files\s*\((.*?)\)/is',
-                '',
-                $select
-            );
-
-            if ($selectWithoutFiles !== null) {
-                $select = trim($selectWithoutFiles);
-            }
-
-            $select = rtrim(
-                $select,
-                " \t\n\r,"
-            );
-
-            if ($select === '') {
-                $select = '*';
-            }
+            $select =
+                remove_portfolio_files_select(
+                    $select
+                );
         }
 
 
@@ -155,13 +398,14 @@ try {
         */
 
         if (
-            !preg_match(
-                '/^[a-zA-Z0-9_"\'\s,.\*]+$/',
+            !validate_select_string(
                 $select
             )
         ) {
+
             json_response([
-                'error' => 'Invalid select parameter',
+                'error' =>
+                    'Invalid select parameter',
             ], 400);
         }
 
@@ -175,14 +419,13 @@ try {
         $sql =
             'SELECT ' .
             $select .
-            ' FROM "public"."' .
-            $table .
-            '"';
+            ' FROM "public".' .
+            quote_identifier($table);
 
 
         /*
         |--------------------------------------------------------------------------
-        | WHERE eq_* filters
+        | WHERE filters
         |--------------------------------------------------------------------------
         */
 
@@ -190,27 +433,114 @@ try {
 
         $params = [];
 
-        foreach ($_GET as $key => $value) {
+        foreach (
+            $_GET as $key => $value
+        ) {
 
-            if (strpos($key, 'eq_') === 0) {
+            /*
+             * Equality:
+             *
+             * eq_trainee_id=UUID
+             */
 
-                $column = substr($key, 3);
+            if (
+                str_starts_with(
+                    $key,
+                    'eq_'
+                )
+            ) {
 
-                if (!validate_column_name($column)) {
+                $column =
+                    substr($key, 3);
+
+                if (
+                    !validate_column_name(
+                        $column
+                    )
+                ) {
                     continue;
                 }
 
                 $placeholder =
                     ':eq_' .
-                    $column;
+                    count($params);
 
                 $where[] =
-                    '"' .
-                    $column .
-                    '" = ' .
+                    quote_identifier(
+                        $column
+                    ) .
+                    ' = ' .
                     $placeholder;
 
-                $params[$placeholder] = $value;
+                $params[$placeholder] =
+                    $value;
+            }
+
+
+            /*
+             * IN:
+             *
+             * in_trainee_id=["uuid1","uuid2"]
+             */
+
+            if (
+                str_starts_with(
+                    $key,
+                    'in_'
+                )
+            ) {
+
+                $column =
+                    substr($key, 3);
+
+                if (
+                    !validate_column_name(
+                        $column
+                    )
+                ) {
+                    continue;
+                }
+
+                $values =
+                    json_decode(
+                        (string) $value,
+                        true
+                    );
+
+                if (
+                    !is_array($values) ||
+                    empty($values)
+                ) {
+                    continue;
+                }
+
+                $inPlaceholders = [];
+
+                foreach (
+                    $values as $index => $inValue
+                ) {
+
+                    $placeholder =
+                        ':in_' .
+                        count($params);
+
+                    $inPlaceholders[] =
+                        $placeholder;
+
+                    $params[$placeholder] =
+                        $inValue;
+                }
+
+                $where[] =
+                    quote_identifier(
+                        $column
+                    ) .
+                    ' IN (' .
+                    implode(
+                        ', ',
+                        $inPlaceholders
+                    ) .
+                    ')';
             }
         }
 
@@ -219,7 +549,10 @@ try {
 
             $sql .=
                 ' WHERE ' .
-                implode(' AND ', $where);
+                implode(
+                    ' AND ',
+                    $where
+                );
         }
 
 
@@ -229,20 +562,13 @@ try {
         |--------------------------------------------------------------------------
         */
 
-        if (!empty($_GET['order'])) {
+        if (
+            !empty($_GET['order'])
+        ) {
 
-            $order = preg_replace(
-                '/[^a-zA-Z0-9_, ]/',
-                '',
-                $_GET['order']
+            $sql .= build_order_by(
+                (string) $_GET['order']
             );
-
-            if ($order !== '') {
-
-                $sql .=
-                    ' ORDER BY ' .
-                    $order;
-            }
         }
 
 
@@ -252,18 +578,22 @@ try {
         |--------------------------------------------------------------------------
         */
 
-        $stmt = $pdo->prepare($sql);
+        $stmt =
+            $pdo->prepare($sql);
 
-        $stmt->execute($params);
-
-        $rows = $stmt->fetchAll(
-            PDO::FETCH_ASSOC
+        $stmt->execute(
+            $params
         );
+
+        $rows =
+            $stmt->fetchAll(
+                PDO::FETCH_ASSOC
+            );
 
 
         /*
         |--------------------------------------------------------------------------
-        | Portfolio nested files
+        | portfolio_files nested data
         |--------------------------------------------------------------------------
         */
 
@@ -273,33 +603,42 @@ try {
         ) {
 
             $portfolioItemIds =
-                array_column(
-                    $rows,
-                    'id'
+                array_values(
+                    array_filter(
+                        array_column(
+                            $rows,
+                            'id'
+                        )
+                    )
                 );
 
-            $placeholders = [];
 
-            $fileParams = [];
-
-            foreach (
-                $portfolioItemIds
-                as $index => $itemId
+            if (
+                !empty(
+                    $portfolioItemIds
+                )
             ) {
 
-                $placeholder =
-                    ':portfolio_id_' .
-                    $index;
+                $filePlaceholders = [];
 
-                $placeholders[] =
-                    $placeholder;
+                $fileParams = [];
 
-                $fileParams[$placeholder] =
-                    $itemId;
-            }
+                foreach (
+                    $portfolioItemIds
+                    as $index => $itemId
+                ) {
 
+                    $placeholder =
+                        ':portfolio_file_' .
+                        $index;
 
-            if (!empty($placeholders)) {
+                    $filePlaceholders[] =
+                        $placeholder;
+
+                    $fileParams[$placeholder] =
+                        $itemId;
+                }
+
 
                 $fileSql = '
                     SELECT
@@ -311,18 +650,22 @@ try {
                         storage_path,
                         uploaded_at
                     FROM "public"."portfolio_files"
-                    WHERE portfolio_item_id IN (' .
-                    implode(
-                        ',',
-                        $placeholders
-                    ) .
-                    ')
-                    ORDER BY uploaded_at
+                    WHERE portfolio_item_id IN (
+                        ' .
+                        implode(
+                            ', ',
+                            $filePlaceholders
+                        ) .
+                        '
+                    )
+                    ORDER BY uploaded_at ASC
                 ';
 
 
                 $fileStmt =
-                    $pdo->prepare($fileSql);
+                    $pdo->prepare(
+                        $fileSql
+                    );
 
                 $fileStmt->execute(
                     $fileParams
@@ -335,40 +678,48 @@ try {
                     );
 
 
-                $filesByPortfolioItem = [];
+                $filesByItem = [];
 
 
-                foreach ($files as $file) {
+                foreach (
+                    $files as $file
+                ) {
 
                     $itemId =
-                        $file['portfolio_item_id'];
+                        $file[
+                            'portfolio_item_id'
+                        ];
 
                     if (
                         !isset(
-                            $filesByPortfolioItem[
+                            $filesByItem[
                                 $itemId
                             ]
                         )
                     ) {
-                        $filesByPortfolioItem[
+
+                        $filesByItem[
                             $itemId
                         ] = [];
                     }
 
-
-                    $filesByPortfolioItem[
+                    $filesByItem[
                         $itemId
                     ][] = $file;
                 }
 
 
-                foreach ($rows as &$row) {
+                foreach (
+                    $rows as &$row
+                ) {
 
                     $itemId =
-                        $row['id'];
+                        $row['id'] ?? null;
 
-                    $row['portfolio_files'] =
-                        $filesByPortfolioItem[
+                    $row[
+                        'portfolio_files'
+                    ] =
+                        $filesByItem[
                             $itemId
                         ] ?? [];
                 }
@@ -384,19 +735,9 @@ try {
         |--------------------------------------------------------------------------
         */
 
-        if (!empty($_GET['single'])) {
-
-            json_response([
-                'data' =>
-                    $rows[0] ?? null,
-            ]);
-
-        } else {
-
-            json_response([
-                'data' => $rows,
-            ]);
-        }
+        json_response([
+            'data' => $rows,
+        ]);
     }
 
 
@@ -405,21 +746,20 @@ try {
     | POST
     |--------------------------------------------------------------------------
     |
-    | Used by:
-    |
-    | .from('table')
-    | .insert(...)
-    |
+    | INSERT
+    |--------------------------------------------------------------------------
     */
 
     if ($method === 'POST') {
 
-        $body = get_json_body();
+        $body =
+            get_json_body();
 
         if (empty($body)) {
 
             json_response([
-                'error' => 'Empty request body',
+                'error' =>
+                    'Empty request body',
             ], 400);
         }
 
@@ -430,35 +770,29 @@ try {
 
         $params = [];
 
-        foreach ($body as $column => $value) {
+        foreach (
+            $body as $column => $value
+        ) {
 
-            if (!validate_column_name($column)) {
+            if (
+                !validate_column_name(
+                    (string) $column
+                )
+            ) {
                 continue;
             }
 
-
-            /*
-             * Do not manually insert the ID when the database
-             * provides a default UUID.
-             *
-             * If an ID was explicitly supplied, however,
-             * allow it.
-             */
-
             $columns[] =
-                '"' .
-                $column .
-                '"';
-
+                quote_identifier(
+                    (string) $column
+                );
 
             $placeholder =
                 ':insert_' .
                 count($params);
 
-
             $placeholders[] =
                 $placeholder;
-
 
             $params[$placeholder] =
                 $value;
@@ -474,58 +808,35 @@ try {
         }
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | IMPORTANT:
-        |
-        | PostgreSQL supports RETURNING directly on the INSERT.
-        |
-        | We MUST NOT execute the INSERT twice.
-        |--------------------------------------------------------------------------
-        */
-
         $sql =
-            'INSERT INTO "public"."' .
-            $table .
-            '" (' .
-            implode(',', $columns) .
+            'INSERT INTO "public".' .
+            quote_identifier($table) .
+            ' (' .
+            implode(
+                ', ',
+                $columns
+            ) .
             ') VALUES (' .
-            implode(',', $placeholders) .
+            implode(
+                ', ',
+                $placeholders
+            ) .
             ') RETURNING *';
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | Execute INSERT ONCE
-        |--------------------------------------------------------------------------
-        */
-
         $stmt =
             $pdo->prepare($sql);
-
 
         $stmt->execute(
             $params
         );
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | Get inserted row
-        |--------------------------------------------------------------------------
-        */
-
         $inserted =
             $stmt->fetch(
                 PDO::FETCH_ASSOC
             );
 
-
-        /*
-        |--------------------------------------------------------------------------
-        | Response
-        |--------------------------------------------------------------------------
-        */
 
         json_response([
             'data' =>
@@ -539,17 +850,14 @@ try {
     | PUT
     |--------------------------------------------------------------------------
     |
-    | Used by:
-    |
-    | .from('users_profile')
-    | .update(...)
-    | .eq('id', userId)
-    |
+    | UPDATE
+    |--------------------------------------------------------------------------
     */
 
     if ($method === 'PUT') {
 
-        $id = $_GET['id'] ?? null;
+        $id =
+            $_GET['id'] ?? null;
 
         if (!$id) {
 
@@ -560,7 +868,8 @@ try {
         }
 
 
-        $body = get_json_body();
+        $body =
+            get_json_body();
 
         if (empty($body)) {
 
@@ -578,18 +887,25 @@ try {
         ];
 
 
-        foreach ($body as $column => $value) {
+        foreach (
+            $body as $column => $value
+        ) {
 
             /*
-             * Never allow ID updates.
+             * Never allow primary-key modification.
              */
 
-            if ($column === 'id') {
+            if (
+                $column === 'id'
+            ) {
                 continue;
             }
 
-
-            if (!validate_column_name($column)) {
+            if (
+                !validate_column_name(
+                    (string) $column
+                )
+            ) {
                 continue;
             }
 
@@ -600,9 +916,10 @@ try {
 
 
             $set[] =
-                '"' .
-                $column .
-                '" = ' .
+                quote_identifier(
+                    (string) $column
+                ) .
+                ' = ' .
                 $placeholder;
 
 
@@ -621,17 +938,19 @@ try {
 
 
         $sql =
-            'UPDATE "public"."' .
-            $table .
-            '" SET ' .
-            implode(',', $set) .
-            ' WHERE "id" = :update_id ' .
-            ' RETURNING *';
+            'UPDATE "public".' .
+            quote_identifier($table) .
+            ' SET ' .
+            implode(
+                ', ',
+                $set
+            ) .
+            ' WHERE "id" = :update_id
+              RETURNING *';
 
 
         $stmt =
             $pdo->prepare($sql);
-
 
         $stmt->execute(
             $params
@@ -655,18 +974,12 @@ try {
     |--------------------------------------------------------------------------
     | DELETE
     |--------------------------------------------------------------------------
-    |
-    | Used by:
-    |
-    | .from('table')
-    | .delete()
-    | .eq('id', id)
-    |
     */
 
     if ($method === 'DELETE') {
 
-        $id = $_GET['id'] ?? null;
+        $id =
+            $_GET['id'] ?? null;
 
         if (!$id) {
 
@@ -678,14 +991,13 @@ try {
 
 
         $sql =
-            'DELETE FROM "public"."' .
-            $table .
-            '" WHERE "id" = :delete_id';
+            'DELETE FROM "public".' .
+            quote_identifier($table) .
+            ' WHERE "id" = :delete_id';
 
 
         $stmt =
             $pdo->prepare($sql);
-
 
         $stmt->execute([
             ':delete_id' => $id,
@@ -700,13 +1012,15 @@ try {
 
     /*
     |--------------------------------------------------------------------------
-    | Unsupported method
+    | Unsupported HTTP method
     |--------------------------------------------------------------------------
     */
 
     json_response([
-        'error' => 'Method not allowed',
-        'method' => $method,
+        'error' =>
+            'Method not allowed',
+        'method' =>
+            $method,
     ], 405);
 
 
@@ -760,7 +1074,10 @@ try {
         PHP_EOL;
 
     $log .=
-        str_repeat('-', 80) .
+        str_repeat(
+            '-',
+            80
+        ) .
         PHP_EOL;
 
 
@@ -774,13 +1091,14 @@ try {
     http_response_code(500);
 
     echo json_encode([
-        'error' => 'query_failed',
+        'error' =>
+            'query_failed',
 
-        /*
-         * This is useful while debugging your local server.
-         */
         'detail' =>
             $e->getMessage(),
+
+        'table' =>
+            $table,
     ]);
 
     exit;
@@ -826,11 +1144,15 @@ try {
         PHP_EOL;
 
     $log .=
+        'TRACE: ' .
         $e->getTraceAsString() .
         PHP_EOL;
 
     $log .=
-        str_repeat('-', 80) .
+        str_repeat(
+            '-',
+            80
+        ) .
         PHP_EOL;
 
 
@@ -844,8 +1166,14 @@ try {
     http_response_code(500);
 
     echo json_encode([
-        'error' => 'query_failed',
-        'detail' => $e->getMessage(),
+        'error' =>
+            'query_failed',
+
+        'detail' =>
+            $e->getMessage(),
+
+        'table' =>
+            $table,
     ]);
 
     exit;
