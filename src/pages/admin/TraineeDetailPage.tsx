@@ -103,33 +103,190 @@ export default function TraineeDetailPage() {
 
   useEffect(() => {
     if (!id) return
-    let cancelled = false
-    setLoading(true)
 
-    Promise.all([
-      getTraineeById(id),
-      listTraineeTrainingRecords(id),
-      getTraineeTrainingProgress(id),
-      listTraineePortfolioItems(id),
-      listTraineeAssessments(id),
-      listTraineeReviews(id),
-    ]).then(([traineeRes, recordsRes, progressRes, portfolioRes, assessRes, reviewRes]) => {
-      if (cancelled) return
-      if (traineeRes.error) {
-        setErrorMsg(traineeRes.error.message)
-      } else if (!traineeRes.trainee) {
-        setErrorMsg('Trainee not found — they may have been removed.')
-      } else {
-        setTrainee(traineeRes.trainee)
-        setErrorMsg(null)
+    let cancelled = false
+
+    const loadTraineeDetails = async () => {
+      setLoading(true)
+      setErrorMsg(null)
+
+      try {
+        const results = await Promise.allSettled([
+          getTraineeById(id),
+          listTraineeTrainingRecords(id),
+          getTraineeTrainingProgress(id),
+          listTraineePortfolioItems(id),
+          listTraineeAssessments(id),
+          listTraineeReviews(id),
+        ])
+
+        if (cancelled) return
+
+        // ------------------------------------------------------------
+        // Trainee profile
+        // ------------------------------------------------------------
+
+        const traineeResult = results[0]
+
+        if (traineeResult.status === 'rejected') {
+          setErrorMsg(
+            traineeResult.reason?.message ??
+              'Failed to load trainee profile.',
+          )
+        } else {
+          const traineeRes = traineeResult.value
+
+          if (traineeRes.error) {
+            setErrorMsg(traineeRes.error.message)
+          } else if (!traineeRes.trainee) {
+            setErrorMsg(
+              'Trainee not found — they may have been removed.',
+            )
+          } else {
+            setTrainee(traineeRes.trainee)
+          }
+        }
+
+        // ------------------------------------------------------------
+        // Training records
+        // ------------------------------------------------------------
+
+        const recordsResult = results[1]
+
+        if (recordsResult.status === 'fulfilled') {
+          const recordsRes = recordsResult.value
+
+          if (!recordsRes.error) {
+            setTrainingRecords(recordsRes.records)
+          } else {
+            console.error(
+              '[TraineeDetailPage] Training records error:',
+              recordsRes.error,
+            )
+          }
+        } else {
+          console.error(
+            '[TraineeDetailPage] Training records request failed:',
+            recordsResult.reason,
+          )
+        }
+
+        // ------------------------------------------------------------
+        // Training progress
+        // ------------------------------------------------------------
+
+        const progressResult = results[2]
+
+        if (progressResult.status === 'fulfilled') {
+          const progressRes = progressResult.value
+
+          if (!progressRes.error) {
+            setTrainingProgress(progressRes.progress)
+          } else {
+            console.error(
+              '[TraineeDetailPage] Training progress error:',
+              progressRes.error,
+            )
+          }
+        } else {
+          console.error(
+            '[TraineeDetailPage] Training progress request failed:',
+            progressResult.reason,
+          )
+        }
+
+        // ------------------------------------------------------------
+        // Portfolio
+        // ------------------------------------------------------------
+
+        const portfolioResult = results[3]
+
+        if (portfolioResult.status === 'fulfilled') {
+          const portfolioRes = portfolioResult.value
+
+          if (!portfolioRes.error) {
+            setPortfolioItems(portfolioRes.items)
+          } else {
+            console.error(
+              '[TraineeDetailPage] Portfolio error:',
+              portfolioRes.error,
+            )
+          }
+        } else {
+          console.error(
+            '[TraineeDetailPage] Portfolio request failed:',
+            portfolioResult.reason,
+          )
+        }
+
+        // ------------------------------------------------------------
+        // Assessments
+        // ------------------------------------------------------------
+
+        const assessmentResult = results[4]
+
+        if (assessmentResult.status === 'fulfilled') {
+          const assessRes = assessmentResult.value
+
+          if (!assessRes.error) {
+            setAssessments(assessRes.assessments)
+          } else {
+            console.error(
+              '[TraineeDetailPage] Assessments error:',
+              assessRes.error,
+            )
+          }
+        } else {
+          console.error(
+            '[TraineeDetailPage] Assessments request failed:',
+            assessmentResult.reason,
+          )
+        }
+
+        // ------------------------------------------------------------
+        // Reviews
+        // ------------------------------------------------------------
+
+        const reviewResult = results[5]
+
+        if (reviewResult.status === 'fulfilled') {
+          const reviewRes = reviewResult.value
+
+          if (!reviewRes.error) {
+            setReviews(reviewRes.reviews)
+          } else {
+            console.error(
+              '[TraineeDetailPage] Reviews error:',
+              reviewRes.error,
+            )
+          }
+        } else {
+          console.error(
+            '[TraineeDetailPage] Reviews request failed:',
+            reviewResult.reason,
+          )
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error(
+            '[TraineeDetailPage] Unexpected loading error:',
+            error,
+          )
+
+          setErrorMsg(
+            error instanceof Error
+              ? error.message
+              : 'Failed to load trainee details.',
+          )
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false)
+        }
       }
-      if (!recordsRes.error) setTrainingRecords(recordsRes.records)
-      if (!progressRes.error) setTrainingProgress(progressRes.progress)
-      if (!portfolioRes.error) setPortfolioItems(portfolioRes.items)
-      if (!assessRes.error) setAssessments(assessRes.assessments)
-      if (!reviewRes.error) setReviews(reviewRes.reviews)
-      setLoading(false)
-    })
+    }
+
+    loadTraineeDetails()
 
     return () => {
       cancelled = true
