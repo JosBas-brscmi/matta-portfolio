@@ -1,4 +1,3 @@
-
 <?php
 
 header('Content-Type: application/json');
@@ -31,19 +30,24 @@ function json_response($data, int $status = 200): void
 |--------------------------------------------------------------------------
 | Authentication
 |--------------------------------------------------------------------------
+|
+| The application uses PHP sessions.
+| The logged-in user's ID must be stored in $_SESSION['user_id'].
+|
 */
 
 if (empty($_SESSION['user_id'])) {
     json_response([
-        'error' => 'Not signed in'
+        'error' => 'Not signed in',
+        'message' => 'No authenticated PHP session was found.'
     ], 401);
 }
 
-$userId = $_SESSION['user_id'];
+$userId = (string) $_SESSION['user_id'];
 
 /*
 |--------------------------------------------------------------------------
-| Trainee ID
+| Validate trainee ID
 |--------------------------------------------------------------------------
 */
 
@@ -52,6 +56,24 @@ $traineeId = trim($_GET['trainee_id'] ?? '');
 if ($traineeId === '') {
     json_response([
         'error' => 'trainee_id is required'
+    ], 400);
+}
+
+/*
+|--------------------------------------------------------------------------
+| Validate UUID format
+|--------------------------------------------------------------------------
+|
+| Prevent malformed IDs from reaching PostgreSQL.
+|
+*/
+
+if (!preg_match(
+    '/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/',
+    $traineeId
+)) {
+    json_response([
+        'error' => 'Invalid trainee_id'
     ], 400);
 }
 
@@ -67,60 +89,85 @@ try {
 
     /*
     |--------------------------------------------------------------------------
-    | Get logged-in user's role
+    | Get logged-in user's profile
     |--------------------------------------------------------------------------
     */
 
-    $roleStmt = $db->prepare("
-        SELECT role
+    $profileStmt = $db->prepare("
+        SELECT
+            id,
+            email,
+            full_name,
+            role
         FROM public.users_profile
         WHERE id = :user_id
         LIMIT 1
     ");
 
-    $roleStmt->execute([
+    $profileStmt->execute([
         ':user_id' => $userId
     ]);
 
-    $profile = $roleStmt->fetch(PDO::FETCH_ASSOC);
+    $profile = $profileStmt->fetch(PDO::FETCH_ASSOC);
 
-    $role = strtolower(trim($profile['role'] ?? ''));
+    if (!$profile) {
+        json_response([
+            'error' => 'User profile not found',
+            'message' => 'The logged-in session does not correspond to a users_profile record.'
+        ], 403);
+    }
 
     /*
     |--------------------------------------------------------------------------
-    | Privileged users
+    | Normalize role
+    |--------------------------------------------------------------------------
+    */
+
+    $role = strtolower(trim((string) ($profile['role'] ?? '')));
+
+    /*
+    |--------------------------------------------------------------------------
+    | Roles allowed to view ANY trainee
     |--------------------------------------------------------------------------
     |
-    | These users can view training records belonging to any trainee.
+    | These are the roles used by the MATTA application.
+    |
+    | owner     -> full administrative access
+    | ma_center -> MA center administrative access
+    |
+    | The additional roles are retained for compatibility with
+    | installations that may already use them.
     |
     */
 
     $privilegedRoles = [
         'owner',
         'ma_center',
+
+        // Compatibility with other possible staff roles
         'admin',
         'administrator',
         'staff',
         'trainer',
         'manager',
-        'supervisor'
+        'supervisor',
+        'mentor'
     ];
 
     $authorized = in_array($role, $privilegedRoles, true);
 
     /*
     |--------------------------------------------------------------------------
-    | Normal trainee authorization
+    | Non-privileged users
     |--------------------------------------------------------------------------
     |
-    | If the logged-in user is not privileged, they can only
-    | view their own trainee record.
+    | A normal trainee can only access their own training records.
     |
     */
 
     if (!$authorized) {
 
-        $traineeStmt = $db->prepare("
+        $ownershipStmt = $db->prepare("
             SELECT id
             FROM public.trainees
             WHERE id = :trainee_id
@@ -128,12 +175,14 @@ try {
             LIMIT 1
         ");
 
-        $traineeStmt->execute([
+        $ownershipStmt->execute([
             ':trainee_id' => $traineeId,
             ':user_id' => $userId
         ]);
 
-        $authorized = (bool) $traineeStmt->fetch(PDO::FETCH_ASSOC);
+        if ($ownershipStmt->fetch(PDO::FETCH_ASSOC)) {
+            $authorized = true;
+        }
     }
 
     /*
@@ -143,7 +192,6 @@ try {
     */
 
     if (!$authorized) {
-
         json_response([
             'error' => 'Forbidden',
             'message' => 'You are not authorized to view this trainee.'
@@ -152,8 +200,42 @@ try {
 
     /*
     |--------------------------------------------------------------------------
+    | Verify trainee exists
+    |--------------------------------------------------------------------------
+    */
+
+    $traineeCheckStmt = $db->prepare("
+        SELECT id
+        FROM public.trainees
+        WHERE id = :trainee_id
+        LIMIT 1
+    ");
+
+    $traineeCheckStmt->execute([
+        ':trainee_id' => $traineeId
+    ]);
+
+    if (!$traineeCheckStmt->fetch(PDO::FETCH_ASSOC)) {
+        json_response([
+            'error' => 'Trainee not found',
+            'message' => 'No trainee exists with the requested ID.'
+        ], 404);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
     | Fetch training records
     |--------------------------------------------------------------------------
+    |
+    | course_phase, course_instructor and course_category are NOT database
+    | columns. They are frontend/API names.
+    |
+    | The actual database columns are:
+    |
+    | courses.phase
+    | courses.instructor
+    | courses.category
+    |
     */
 
     $stmt = $db->prepare("
@@ -170,7 +252,7 @@ try {
             tr.created_at,
             tr.updated_at,
 
-            c.id AS c_id,
+            c.id AS course_id,
             c.course_code,
             c.course_name,
             c.category,
@@ -178,9 +260,7 @@ try {
             c.hours AS course_hours,
             c.instructor,
             c.description,
-            c.is_active,
-            c.created_at AS course_created_at,
-            c.updated_at AS course_updated_at
+            c.is_active
 
         FROM public.training_records tr
 
@@ -202,10 +282,10 @@ try {
 
     /*
     |--------------------------------------------------------------------------
-    | Build response
+    | Format records for traineeService.ts
     |--------------------------------------------------------------------------
     |
-    | The frontend expects each training record to contain:
+    | The frontend expects:
     |
     | record.course.course_name
     | record.course.phase
@@ -218,38 +298,38 @@ try {
 
     foreach ($rows as $row) {
 
-        $course = null;
-
-        if (!empty($row['c_id'])) {
-
-            $course = [
-                'id' => $row['c_id'],
-                'course_code' => $row['course_code'],
-                'course_name' => $row['course_name'],
-                'category' => $row['category'],
-                'phase' => $row['phase'],
-                'hours' => $row['course_hours'],
-                'instructor' => $row['instructor'],
-                'description' => $row['description'],
-                'is_active' => $row['is_active'],
-                'created_at' => $row['course_created_at'],
-                'updated_at' => $row['course_updated_at']
-            ];
-        }
-
         $records[] = [
             'id' => $row['id'],
             'trainee_id' => $row['trainee_id'],
             'course_id' => $row['course_id'],
             'attendance_date' => $row['attendance_date'],
             'attended' => (bool) $row['attended'],
-            'test_score' => $row['test_score'],
+            'test_score' => $row['test_score'] !== null
+                ? (float) $row['test_score']
+                : null,
             'reflection' => $row['reflection'],
             'completion_status' => $row['completion_status'],
-            'hours' => $row['hours'],
+            'hours' => $row['hours'] !== null
+                ? (float) $row['hours']
+                : null,
             'created_at' => $row['created_at'],
             'updated_at' => $row['updated_at'],
-            'course' => $course
+
+            'course' => $row['course_id'] !== null
+                ? [
+                    'id' => $row['course_id'],
+                    'course_code' => $row['course_code'],
+                    'course_name' => $row['course_name'],
+                    'category' => $row['category'],
+                    'phase' => $row['phase'],
+                    'hours' => $row['course_hours'] !== null
+                        ? (float) $row['course_hours']
+                        : null,
+                    'instructor' => $row['instructor'],
+                    'description' => $row['description'],
+                    'is_active' => (bool) $row['is_active']
+                ]
+                : null
         ];
     }
 
@@ -257,10 +337,15 @@ try {
     |--------------------------------------------------------------------------
     | Return response
     |--------------------------------------------------------------------------
+    |
+    | traineeService.ts may expect either `data` or `records`.
+    | Returning both keeps this endpoint compatible with either version.
+    |
     */
 
     json_response([
-        'data' => $records
+        'data' => $records,
+        'records' => $records
     ], 200);
 
 } catch (Throwable $e) {
@@ -275,3 +360,4 @@ try {
         'detail' => $e->getMessage()
     ], 500);
 }
+
