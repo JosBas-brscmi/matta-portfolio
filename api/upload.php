@@ -48,7 +48,7 @@ if (!isset($_FILES['file'])) {
     json_response([
         'error' => 'no_file',
         'request_method' =>
-            $_SERVER['REQUEST_METHOD'] ?? 'unknown',
+        $_SERVER['REQUEST_METHOD'] ?? 'unknown',
     ], 400);
 }
 
@@ -140,7 +140,7 @@ if (!is_dir($uploadsDir)) {
 
         json_response([
             'error' =>
-                'could_not_create_upload_directory',
+            'could_not_create_upload_directory',
         ], 500);
     }
 }
@@ -188,7 +188,7 @@ if ($requestedPath !== '') {
 
         json_response([
             'error' =>
-                'invalid_storage_path',
+            'invalid_storage_path',
         ], 400);
     }
 
@@ -204,14 +204,13 @@ if ($requestedPath !== '') {
 
         json_response([
             'error' =>
-                'invalid_storage_path',
+            'invalid_storage_path',
         ], 400);
     }
 
     $relativePath =
         'storage/uploads/' .
         $requestedPath;
-
 } else {
 
     /*
@@ -276,7 +275,7 @@ if (!is_dir($parentDir)) {
 
         json_response([
             'error' =>
-                'could_not_create_storage_path',
+            'could_not_create_storage_path',
         ], 500);
     }
 }
@@ -291,16 +290,16 @@ if (
         $realParentDir !== $realUploadsDir &&
         !str_starts_with(
             $realParentDir .
-            DIRECTORY_SEPARATOR,
+                DIRECTORY_SEPARATOR,
             $realUploadsDir .
-            DIRECTORY_SEPARATOR
+                DIRECTORY_SEPARATOR
         )
     )
 ) {
 
     json_response([
         'error' =>
-            'invalid_storage_location',
+        'invalid_storage_location',
     ], 400);
 }
 
@@ -314,7 +313,7 @@ if (file_exists($absolutePath)) {
 
     json_response([
         'error' =>
-            'file_already_exists',
+        'file_already_exists',
     ], 409);
 }
 
@@ -369,10 +368,10 @@ if (
 
     json_response([
         'error' =>
-            'file_too_large',
+        'file_too_large',
 
         'max_size_bytes' =>
-            $maxFileSize,
+        $maxFileSize,
     ], 413);
 }
 
@@ -391,7 +390,7 @@ if (
 
     json_response([
         'error' =>
-            'move_failed',
+        'move_failed',
     ], 500);
 }
 
@@ -405,7 +404,7 @@ if (!file_exists($absolutePath)) {
 
     json_response([
         'error' =>
-            'file_not_found_after_upload',
+        'file_not_found_after_upload',
     ], 500);
 }
 
@@ -459,18 +458,18 @@ $publicUrl =
 json_response([
     'data' => [
         'publicUrl' =>
-            $publicUrl,
+        $publicUrl,
 
         'storage_path' =>
-            $relativePath,
+        $relativePath,
 
         'file_name' =>
-            $originalName,
+        $originalName,
 
         'file_type' =>
-            $fileType,
+        $fileType,
 
         'file_size_bytes' =>
-            $fileSize,
+        $fileSize,
     ],
 ]);

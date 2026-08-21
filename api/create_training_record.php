@@ -446,16 +446,16 @@ try {
     RETURNING *
 ");
 
-$recordStmt->execute([
-    ':id' => $recordId,
-    ':trainee_id' => $traineeId,
-    ':course_id' => $courseId,
-    ':attendance_date' => $attendanceDate,
-    ':attended' => $attended,
-    ':test_score' => $testScore,
-    ':reflection' => $reflection,
-    ':hours' => $hours
-]);
+    $recordStmt->execute([
+        ':id' => $recordId,
+        ':trainee_id' => $traineeId,
+        ':course_id' => $courseId,
+        ':attendance_date' => $attendanceDate,
+        ':attended' => $attended,
+        ':test_score' => $testScore,
+        ':reflection' => $reflection,
+        ':hours' => $hours
+    ]);
 
     $record = $recordStmt->fetch(PDO::FETCH_ASSOC);
 

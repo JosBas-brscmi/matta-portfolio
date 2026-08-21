@@ -1,3 +1,4 @@
+
 <?php
 
 header('Content-Type: application/json');
@@ -30,10 +31,6 @@ function json_response($data, int $status = 200): void
 |--------------------------------------------------------------------------
 | Authentication
 |--------------------------------------------------------------------------
-|
-| The application uses PHP sessions.
-| The logged-in user's ID must be stored in $_SESSION['user_id'].
-|
 */
 
 if (empty($_SESSION['user_id'])) {
@@ -47,7 +44,7 @@ $userId = (string) $_SESSION['user_id'];
 
 /*
 |--------------------------------------------------------------------------
-| Validate trainee ID
+| Get trainee ID
 |--------------------------------------------------------------------------
 */
 
@@ -61,19 +58,27 @@ if ($traineeId === '') {
 
 /*
 |--------------------------------------------------------------------------
-| Validate UUID format
+| UUID validation
 |--------------------------------------------------------------------------
 |
-| Prevent malformed IDs from reaching PostgreSQL.
+| Do NOT require a UUID version here.
+|
+| Your database contains UUIDs such as:
+|
+| 59b1d224-f8da-cbf0-d4ac-5f83a09865dc
+|
+| The third UUID group does not necessarily have to start with 1-5
+| for this application.
 |
 */
 
 if (!preg_match(
-    '/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/',
+    '/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/',
     $traineeId
 )) {
     json_response([
-        'error' => 'Invalid trainee_id'
+        'error' => 'Invalid trainee_id',
+        'message' => 'The supplied trainee ID is not in a valid UUID format.'
     ], 400);
 }
 
@@ -127,16 +132,10 @@ try {
 
     /*
     |--------------------------------------------------------------------------
-    | Roles allowed to view ANY trainee
+    | Privileged roles
     |--------------------------------------------------------------------------
     |
-    | These are the roles used by the MATTA application.
-    |
-    | owner     -> full administrative access
-    | ma_center -> MA center administrative access
-    |
-    | The additional roles are retained for compatibility with
-    | installations that may already use them.
+    | These users can view any trainee.
     |
     */
 
@@ -144,7 +143,7 @@ try {
         'owner',
         'ma_center',
 
-        // Compatibility with other possible staff roles
+        // Compatibility with other staff roles
         'admin',
         'administrator',
         'staff',
@@ -158,10 +157,11 @@ try {
 
     /*
     |--------------------------------------------------------------------------
-    | Non-privileged users
+    | Normal trainee authorization
     |--------------------------------------------------------------------------
     |
-    | A normal trainee can only access their own training records.
+    | If the user is not a privileged user, they can only view
+    | their own trainee record.
     |
     */
 
@@ -226,16 +226,6 @@ try {
     |--------------------------------------------------------------------------
     | Fetch training records
     |--------------------------------------------------------------------------
-    |
-    | course_phase, course_instructor and course_category are NOT database
-    | columns. They are frontend/API names.
-    |
-    | The actual database columns are:
-    |
-    | courses.phase
-    | courses.instructor
-    | courses.category
-    |
     */
 
     $stmt = $db->prepare("
@@ -252,7 +242,6 @@ try {
             tr.created_at,
             tr.updated_at,
 
-            c.id AS course_id,
             c.course_code,
             c.course_name,
             c.category,
@@ -282,15 +271,10 @@ try {
 
     /*
     |--------------------------------------------------------------------------
-    | Format records for traineeService.ts
+    | Format records
     |--------------------------------------------------------------------------
     |
-    | The frontend expects:
-    |
-    | record.course.course_name
-    | record.course.phase
-    | record.course.category
-    | record.course.instructor
+    | The React traineeService expects a nested course object.
     |
     */
 
@@ -302,16 +286,23 @@ try {
             'id' => $row['id'],
             'trainee_id' => $row['trainee_id'],
             'course_id' => $row['course_id'],
+
             'attendance_date' => $row['attendance_date'],
+
             'attended' => (bool) $row['attended'],
+
             'test_score' => $row['test_score'] !== null
                 ? (float) $row['test_score']
                 : null,
+
             'reflection' => $row['reflection'],
+
             'completion_status' => $row['completion_status'],
+
             'hours' => $row['hours'] !== null
                 ? (float) $row['hours']
                 : null,
+
             'created_at' => $row['created_at'],
             'updated_at' => $row['updated_at'],
 
@@ -322,9 +313,11 @@ try {
                     'course_name' => $row['course_name'],
                     'category' => $row['category'],
                     'phase' => $row['phase'],
+
                     'hours' => $row['course_hours'] !== null
                         ? (float) $row['course_hours']
                         : null,
+
                     'instructor' => $row['instructor'],
                     'description' => $row['description'],
                     'is_active' => (bool) $row['is_active']
@@ -338,14 +331,14 @@ try {
     | Return response
     |--------------------------------------------------------------------------
     |
-    | traineeService.ts may expect either `data` or `records`.
-    | Returning both keeps this endpoint compatible with either version.
+    | Return both "records" and "data" for compatibility with
+    | different versions of traineeService.ts.
     |
     */
 
     json_response([
-        'data' => $records,
-        'records' => $records
+        'records' => $records,
+        'data' => $records
     ], 200);
 
 } catch (Throwable $e) {
@@ -360,4 +353,3 @@ try {
         'detail' => $e->getMessage()
     ], 500);
 }
-
