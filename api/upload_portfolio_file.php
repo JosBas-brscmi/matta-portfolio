@@ -25,19 +25,25 @@ try {
 
     $userId = $_SESSION['user_id'] ?? null;
     if (!$userId) {
-        json_response(['error' => 'Not signed in'], 401);
+        json_response(['error' => 'Not signed in', 'detail' => 'Session user_id missing'], 401);
     }
 
     $traineeId = $_POST['trainee_id'] ?? null;
     $portfolioItemId = $_POST['portfolio_item_id'] ?? null;
 
     if (!$traineeId || !$portfolioItemId) {
-        json_response(['error' => 'Trainee ID and Portfolio Item ID are required.'], 400);
+        json_response([
+            'error' => 'Missing parameters',
+            'detail' => 'trainee_id and portfolio_item_id are required in POST body'
+        ], 400);
     }
 
     if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
-        $uploadErrCode = $_FILES['file']['error'] ?? 'No file provided';
-        json_response(['error' => 'File upload error code: ' . $uploadErrCode], 400);
+        $uploadErrCode = $_FILES['file']['error'] ?? 'No file object present';
+        json_response([
+            'error' => 'File upload error',
+            'detail' => 'PHP upload error code: ' . $uploadErrCode
+        ], 400);
     }
 
     $file = $_FILES['file'];
@@ -45,11 +51,14 @@ try {
     $fileType = $file['type'];
     $fileSize = $file['size'];
 
-    // Ensure uploads directory exists and is writable
+    // Ensure upload storage directory exists
     $uploadDir = __DIR__ . '/uploads/portfolio/';
     if (!is_dir($uploadDir)) {
-        if (!mkdir($uploadDir, 0777, true) && !is_dir($uploadDir)) {
-            json_response(['error' => 'Failed to create upload directory on server.'], 500);
+        if (!@mkdir($uploadDir, 0777, true) && !is_dir($uploadDir)) {
+            json_response([
+                'error' => 'Directory creation failed',
+                'detail' => 'Cannot create path: ' . $uploadDir
+            ], 500);
         }
     }
 
@@ -57,11 +66,11 @@ try {
     $relativeStoragePath = 'portfolio/' . uniqid() . '_' . time() . ($ext ? '.' . $ext : '');
     $destination = __DIR__ . '/uploads/' . $relativeStoragePath;
 
-    if (!move_uploaded_file($file['tmp_name'], $destination)) {
+    if (!@move_uploaded_file($file['tmp_name'], $destination)) {
         $lastErr = error_get_last();
         json_response([
-            'error' => 'Failed to save uploaded file to server.',
-            'detail' => $lastErr['message'] ?? 'Check write permissions on /api/uploads/ folder.'
+            'error' => 'Failed to save uploaded file',
+            'detail' => $lastErr['message'] ?? 'Check write permissions on /api/uploads/ folder'
         ], 500);
     }
 
@@ -107,8 +116,14 @@ try {
 
     json_response(['file' => $uploadedFile], 201);
 
+} catch (PDOException $e) {
+    error_log('[upload_portfolio_file PDO Error] ' . $e->getMessage());
+    json_response([
+        'error' => 'database_error',
+        'detail' => $e->getMessage()
+    ], 500);
 } catch (Throwable $e) {
-    error_log('[upload_portfolio_file] ' . $e->getMessage());
+    error_log('[upload_portfolio_file General Error] ' . $e->getMessage());
     json_response([
         'error' => 'server_error',
         'detail' => $e->getMessage()
