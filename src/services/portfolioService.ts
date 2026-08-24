@@ -191,7 +191,7 @@ export async function createMyPortfolioItem(input: PortfolioItemInput): Promise<
     return { item: null, error }
   }
 
-  const item = (data && 'item' in data ? data.item : data) as PortfolioItem
+  const item = (data && typeof data === 'object' && 'item' in data ? data.item : data) as PortfolioItem
   return { item: item ?? null, error: null }
 }
 
@@ -229,7 +229,7 @@ export async function updateMyPortfolioItem(
     return { item: null, error }
   }
 
-  const item = (data && 'item' in data ? data.item : data) as PortfolioItem
+  const item = (data && typeof data === 'object' && 'item' in data ? data.item : data) as PortfolioItem
   return { item: item ?? null, error: null }
 }
 
@@ -285,34 +285,39 @@ export async function uploadPortfolioFiles(
       continue
     }
 
-    try {
-      const formData = new FormData()
-      formData.append('trainee_id', traineeId)
-      formData.append('portfolio_item_id', portfolioItemId)
-      formData.append('file', file)
+    const formData = new FormData()
+    formData.append('trainee_id', traineeId)
+    formData.append('portfolio_item_id', portfolioItemId)
+    formData.append('file', file)
 
-      const response = await fetch(getApiUrl('/upload_portfolio_file.php'), {
+    const { data, error } = await apiFetch<{ file?: PortfolioFile; data?: PortfolioFile } | PortfolioFile>(
+      '/upload_portfolio_file.php',
+      {
         method: 'POST',
-        credentials: 'include',
         body: formData,
-      })
-
-      const json = await response.json().catch(() => null)
-
-      if (!response.ok || (json && json.ok === false)) {
-        outcome.failed.push({
-          fileName: file.name,
-          message: json?.error ?? json?.message ?? `Upload failed (${response.status})`,
-        })
-        continue
       }
+    )
 
-      const uploadedFile: PortfolioFile = json?.file ?? json?.data ?? json
-      outcome.uploaded.push(uploadedFile)
-    } catch (err) {
+    if (error) {
       outcome.failed.push({
         fileName: file.name,
-        message: err instanceof Error ? err.message : 'Network error uploading file.',
+        message: error.message || 'Upload failed.',
+      })
+      continue
+    }
+
+    const uploadedFile = (
+      data && typeof data === 'object'
+        ? ('file' in data ? data.file : 'data' in data ? data.data : data)
+        : null
+    ) as PortfolioFile | null
+
+    if (uploadedFile) {
+      outcome.uploaded.push(uploadedFile)
+    } else {
+      outcome.failed.push({
+        fileName: file.name,
+        message: 'Invalid file response from server.',
       })
     }
   }
@@ -428,11 +433,14 @@ export async function listReviewQueue(): Promise<{
   items: ReviewQueueItem[]
   error: { message: string } | null
 }> {
-  const { data, error } = await apiFetch<{ items: ReviewQueueItem[] }>('/list_review_queue.php')
-  return {
-    items: data?.items ?? [],
-    error,
+  const { data, error } = await apiFetch<{ items: ReviewQueueItem[] } | ReviewQueueItem[]>('/list_review_queue.php')
+  
+  if (error) {
+    return { items: [], error }
   }
+
+  const items = Array.isArray(data) ? data : data?.items ?? []
+  return { items, error: null }
 }
 
 // ============================================================

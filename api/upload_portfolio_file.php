@@ -28,73 +28,33 @@ try {
         json_response(['error' => 'Not signed in', 'detail' => 'Session user_id missing'], 401);
     }
 
-    // Read JSON input body if content-type was application/json
-    $rawInput = file_get_contents('php://input');
-    $jsonData = !empty($rawInput) ? json_decode($rawInput, true) : [];
-
-    // Extract portfolio_item_id from POST, GET, REQUEST, or JSON payload
-    $portfolioItemId = $_REQUEST['portfolio_item_id'] 
+    // Extract portfolio_item_id from GET query, POST body, or REQUEST
+    $portfolioItemId = $_GET['portfolio_item_id'] 
+        ?? $_POST['portfolio_item_id'] 
+        ?? $_REQUEST['portfolio_item_id'] 
         ?? $_REQUEST['portfolioItemId'] 
-        ?? $_REQUEST['portfolio_id'] 
-        ?? $_REQUEST['item_id'] 
-        ?? ($jsonData['portfolio_item_id'] ?? null)
-        ?? ($jsonData['portfolioItemId'] ?? null)
-        ?? ($jsonData['portfolio_id'] ?? null)
-        ?? ($jsonData['item_id'] ?? null);
+        ?? null;
 
     if (!$portfolioItemId) {
         json_response([
             'error' => 'Missing parameters',
-            'detail' => 'portfolio_item_id is required.',
-            'debug' => [
-                'post' => $_POST,
-                'get' => $_GET,
-                'json_keys' => is_array($jsonData) ? array_keys($jsonData) : null,
-                'content_type' => $_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? 'not_set'
-            ]
+            'detail' => 'portfolio_item_id is required.'
         ], 400);
     }
 
-    // Process file from $_FILES or base64 JSON payload
-    $fileName = '';
-    $fileType = '';
-    $fileSize = 0;
-    $tmpFilePath = '';
-    $isBase64 = false;
-
-    if (isset($_FILES['file']) && $_FILES['file']['error'] === UPLOAD_ERR_OK) {
-        $file = $_FILES['file'];
-        $fileName = basename($file['name']);
-        $fileType = $file['type'];
-        $fileSize = $file['size'];
-        $tmpFilePath = $file['tmp_name'];
-    } elseif (!empty($jsonData['file_data']) || !empty($jsonData['file'])) {
-        // Handle Base64 file upload if sent via JSON
-        $base64String = $jsonData['file_data'] ?? $jsonData['file'];
-        $fileName = basename($jsonData['file_name'] ?? $jsonData['name'] ?? 'uploaded_file');
-        $fileType = $jsonData['file_type'] ?? 'application/octet-stream';
-        
-        if (preg_match('/^data:(.*);base64,/', $base64String, $matches)) {
-            $fileType = $matches[1];
-            $base64String = substr($base64String, strpos($base64String, ',') + 1);
-        }
-        
-        $decodedData = base64_decode($base64String);
-        if ($decodedData === false) {
-            json_response(['error' => 'Invalid Base64 file data.'], 400);
-        }
-        
-        $fileSize = strlen($decodedData);
-        $isBase64 = true;
-    } else {
-        $uploadErrCode = $_FILES['file']['error'] ?? 'No file object received';
+    if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
+        $uploadErrCode = $_FILES['file']['error'] ?? 'No file received in $_FILES';
         json_response([
             'error' => 'File upload error',
             'detail' => 'PHP upload error code: ' . $uploadErrCode
         ], 400);
     }
 
-    // Ensure uploads directory exists
+    $file = $_FILES['file'];
+    $fileName = basename($file['name']);
+    $fileType = $file['type'];
+    $fileSize = $file['size'];
+
     $uploadDir = __DIR__ . '/uploads/portfolio/';
     if (!is_dir($uploadDir)) {
         if (!@mkdir($uploadDir, 0777, true) && !is_dir($uploadDir)) {
@@ -106,18 +66,12 @@ try {
     $relativeStoragePath = 'portfolio/' . uniqid() . '_' . time() . ($ext ? '.' . $ext : '');
     $destination = __DIR__ . '/uploads/' . $relativeStoragePath;
 
-    if ($isBase64) {
-        if (file_put_contents($destination, $decodedData) === false) {
-            json_response(['error' => 'Failed to save base64 file to server.'], 500);
-        }
-    } else {
-        if (!@move_uploaded_file($tmpFilePath, $destination)) {
-            $lastErr = error_get_last();
-            json_response([
-                'error' => 'Failed to save uploaded file',
-                'detail' => $lastErr['message'] ?? 'Check write permissions on /api/uploads/ folder'
-            ], 500);
-        }
+    if (!@move_uploaded_file($file['tmp_name'], $destination)) {
+        $lastErr = error_get_last();
+        json_response([
+            'error' => 'Failed to save uploaded file',
+            'detail' => $lastErr['message'] ?? 'Check write permissions on /api/uploads/ folder'
+        ], 500);
     }
 
     $fileId = generate_uuid();

@@ -1,17 +1,7 @@
-
 // Lightweight local API client for the MATTA portfolio app.
 //
 // This client talks to the local PHP API and PostgreSQL.
 // It does NOT use Supabase.
-//
-// IMPORTANT:
-// - Supports Supabase-style chaining:
-//     .from(...).select(...).eq(...)
-//     .from(...).insert(...).select(...).single()
-//     .from(...).update(...).eq(...).select(...).single()
-//     .from(...).delete().eq(...)
-// - Authentication uses PHP sessions.
-// - File uploads use the local PHP upload.php endpoint.
 
 export interface ApiError {
   message: string
@@ -21,23 +11,6 @@ export interface ApiResult<T = any> {
   data: T | null
   error: ApiError | null
 }
-
-// -----------------------------------------------------------------------------
-// API base URL
-// -----------------------------------------------------------------------------
-
-/*
- * Recommended:
- *
- * VITE_API_URL=/matta/api
- *
- * when your website is accessed as:
- *
- * http://localhost/matta/
- *
- * If VITE_API_URL is not defined, we automatically try to determine
- * whether the application is running under /matta.
- */
 
 function getDefaultApiBaseUrl(): string {
   if (typeof window === 'undefined') {
@@ -69,7 +42,6 @@ function resolveApiUrl(path: string): string {
   return `${NORMALIZED_API_BASE_URL}/${cleanPath}`
 }
 
-// Exported so services can use the same URL resolution logic.
 export function getApiUrl(path: string): string {
   return resolveApiUrl(path)
 }
@@ -84,11 +56,10 @@ export async function apiFetch<T = any>(
 ): Promise<ApiResult<T>> {
   const headers = new Headers(options.headers)
 
-  if (
-    !headers.has('Content-Type') &&
-    options.body &&
-    !(options.body instanceof FormData)
-  ) {
+  if (options.body instanceof FormData) {
+    // Force header removal so the browser auto-generates the multipart boundary
+    headers.delete('Content-Type')
+  } else if (!headers.has('Content-Type') && options.body) {
     headers.set('Content-Type', 'application/json')
   }
 
@@ -187,20 +158,10 @@ function dispatchAuthEvent(
 // -----------------------------------------------------------------------------
 
 type Operation =
-  | {
-      type: 'select'
-    }
-  | {
-      type: 'insert'
-      payload: any
-    }
-  | {
-      type: 'update'
-      payload: any
-    }
-  | {
-      type: 'delete'
-    }
+  | { type: 'select' }
+  | { type: 'insert'; payload: any }
+  | { type: 'update'; payload: any }
+  | { type: 'delete' }
 
 function createTableClient(table: string): any {
   const filters: Record<string, any> = {}
@@ -209,37 +170,8 @@ function createTableClient(table: string): any {
   let orderValue: string | undefined
   let selectStr = '*'
 
-  /*
-   * IMPORTANT:
-   *
-   * select() after insert/update/delete must NOT replace the mutation.
-   *
-   * Example:
-   *
-   * .insert({...})
-   * .select(...)
-   * .single()
-   *
-   * remains an INSERT operation.
-   *
-   * Likewise:
-   *
-   * .update({...})
-   * .eq('id', id)
-   * .select(...)
-   * .single()
-   *
-   * remains an UPDATE operation.
-   */
-  let operation: Operation = {
-    type: 'select',
-  }
-
+  let operation: Operation = { type: 'select' }
   let returning = false
-
-  // ---------------------------------------------------------------------------
-  // SELECT
-  // ---------------------------------------------------------------------------
 
   const executeSelect = async (): Promise<ApiResult<any>> => {
     const params = new URLSearchParams()
@@ -247,79 +179,46 @@ function createTableClient(table: string): any {
     params.set('table', table)
     params.set('select', selectStr)
 
-    Object.entries(filters).forEach(
-      ([key, value]) => {
-        params.set(key, String(value))
-      },
-    )
+    Object.entries(filters).forEach(([key, value]) => {
+      params.set(key, String(value))
+    })
 
-    Object.entries(inFilters).forEach(
-      ([column, values]) => {
-        params.set(
-          `in_${column}`,
-          JSON.stringify(values),
-        )
-      },
-    )
+    Object.entries(inFilters).forEach(([column, values]) => {
+      params.set(`in_${column}`, JSON.stringify(values))
+    })
 
     if (orderValue) {
       params.set('order', orderValue)
     }
 
-    return apiFetch(
-      `/rest.php?${params.toString()}`,
-    )
+    return apiFetch(`/rest.php?${params.toString()}`)
   }
 
-  // ---------------------------------------------------------------------------
-  // INSERT
-  // ---------------------------------------------------------------------------
-
-  const executeInsert = async (
-    payload: any,
-  ): Promise<ApiResult<any>> => {
-    return apiFetch(
-      `/rest.php?table=${encodeURIComponent(table)}`,
-      {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      },
-    )
+  const executeInsert = async (payload: any): Promise<ApiResult<any>> => {
+    return apiFetch(`/rest.php?table=${encodeURIComponent(table)}`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
   }
 
-  // ---------------------------------------------------------------------------
-  // UPDATE
-  // ---------------------------------------------------------------------------
-
-  const executeUpdate = async (
-    payload: any,
-  ): Promise<ApiResult<any>> => {
+  const executeUpdate = async (payload: any): Promise<ApiResult<any>> => {
     const id = filters['eq_id']
 
     if (!id) {
       return {
         data: null,
-        error: {
-          message:
-            'Missing id for update. Use .eq("id", id).',
-        },
+        error: { message: 'Missing id for update. Use .eq("id", id).' },
       }
     }
 
     return apiFetch(
-      `/rest.php?table=${encodeURIComponent(
-        table,
-      )}&id=${encodeURIComponent(id)}`,
+      `/rest.php?table=${encodeURIComponent(table)}&id=${encodeURIComponent(id)}`,
       {
         method: 'PUT',
         body: JSON.stringify(payload),
-      },
+      }
     )
   }
-
-  // ---------------------------------------------------------------------------
-  // DELETE
-  // ---------------------------------------------------------------------------
 
   const executeDelete = async (): Promise<ApiResult<any>> => {
     const id = filters['eq_id']
@@ -327,271 +226,112 @@ function createTableClient(table: string): any {
     if (!id) {
       return {
         data: null,
-        error: {
-          message:
-            'Missing id for delete. Use .eq("id", id).',
-        },
+        error: { message: 'Missing id for delete. Use .eq("id", id).' },
       }
     }
 
     return apiFetch(
-      `/rest.php?table=${encodeURIComponent(
-        table,
-      )}&id=${encodeURIComponent(id)}`,
-      {
-        method: 'DELETE',
-      },
+      `/rest.php?table=${encodeURIComponent(table)}&id=${encodeURIComponent(id)}`,
+      { method: 'DELETE' }
     )
   }
-
-  // ---------------------------------------------------------------------------
-  // EXECUTE
-  // ---------------------------------------------------------------------------
 
   const execute = async (): Promise<ApiResult<any>> => {
     switch (operation.type) {
       case 'select':
         return executeSelect()
-
       case 'insert':
         return executeInsert(operation.payload)
-
       case 'update':
         return executeUpdate(operation.payload)
-
       case 'delete':
         return executeDelete()
-
       default:
         return {
           data: null,
-          error: {
-            message: 'Unknown API operation.',
-          },
+          error: { message: 'Unknown API operation.' },
         }
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Convert a result into a single row
-  // ---------------------------------------------------------------------------
-
-  const firstRow = (
-    data: any,
-  ): any => {
+  const firstRow = (data: any): any => {
     if (Array.isArray(data)) {
       return data[0] ?? null
     }
-
     return data ?? null
   }
 
-  // ---------------------------------------------------------------------------
-  // Chain API
-  // ---------------------------------------------------------------------------
-
   const api: any = {
-    // -------------------------------------------------------------------------
-    // SELECT
-    // -------------------------------------------------------------------------
-
-    select: (
-      value = '*',
-    ) => {
+    select: (value = '*') => {
       selectStr = value
-
-      /*
-       * If this is a normal SELECT, keep SELECT.
-       *
-       * If this is INSERT/UPDATE/DELETE, keep the mutation operation.
-       * The PHP mutation endpoint returns the affected row/data.
-       */
       if (operation.type === 'select') {
-        operation = {
-          type: 'select',
-        }
+        operation = { type: 'select' }
       } else {
         returning = true
       }
-
       return api
     },
 
-    // -------------------------------------------------------------------------
-    // WHERE column = value
-    // -------------------------------------------------------------------------
-
-    eq: (
-      column: string,
-      value: any,
-    ) => {
+    eq: (column: string, value: any) => {
       filters[`eq_${column}`] = value
       return api
     },
 
-    // -------------------------------------------------------------------------
-    // WHERE column IN (...)
-    // -------------------------------------------------------------------------
-
-    in: (
-      column: string,
-      values: any[],
-    ) => {
+    in: (column: string, values: any[]) => {
       if (!Array.isArray(values)) {
-        throw new Error(
-          `.in('${column}', values) requires an array.`,
-        )
+        throw new Error(`.in('${column}', values) requires an array.`)
       }
-
       inFilters[column] = values
-
       return api
     },
-
-    // -------------------------------------------------------------------------
-    // ORDER BY
-    // -------------------------------------------------------------------------
 
     order: (
       column: string,
-      options?: {
-        ascending?: boolean
-        nullsFirst?: boolean
-        referencedTable?: string
-      },
+      options?: { ascending?: boolean; nullsFirst?: boolean; referencedTable?: string }
     ) => {
-      const ascending =
-        options?.ascending !== false
-
-      orderValue = ascending
-        ? `${column}.asc`
-        : `${column}.desc`
-
+      const ascending = options?.ascending !== false
+      orderValue = ascending ? `${column}.asc` : `${column}.desc`
       return api
     },
 
-    // -------------------------------------------------------------------------
-    // LIMIT
-    // -------------------------------------------------------------------------
-
-    limit: (
-      count: number,
-    ) => {
+    limit: (count: number) => {
       filters['_limit'] = count
       return api
     },
 
-    // -------------------------------------------------------------------------
-    // INSERT
-    // -------------------------------------------------------------------------
-
-    insert: (
-      payload: any,
-    ) => {
-      operation = {
-        type: 'insert',
-        payload,
-      }
-
+    insert: (payload: any) => {
+      operation = { type: 'insert', payload }
       returning = false
-
       return api
     },
 
-    // -------------------------------------------------------------------------
-    // UPDATE
-    // -------------------------------------------------------------------------
-
-    update: (
-      payload: any,
-    ) => {
-      /*
-       * MUST remain synchronous.
-       *
-       * This allows:
-       *
-       * .update({...})
-       * .eq('id', id)
-       * .select(...)
-       * .single()
-       */
-      operation = {
-        type: 'update',
-        payload,
-      }
-
+    update: (payload: any) => {
+      operation = { type: 'update', payload }
       returning = false
-
       return api
     },
-
-    // -------------------------------------------------------------------------
-    // DELETE
-    // -------------------------------------------------------------------------
 
     delete: () => {
-      operation = {
-        type: 'delete',
-      }
-
+      operation = { type: 'delete' }
       returning = false
-
       return api
     },
-
-    // -------------------------------------------------------------------------
-    // Execute first row
-    // -------------------------------------------------------------------------
 
     single: async () => {
       const result = await execute()
-
-      return {
-        data: firstRow(result.data),
-        error: result.error,
-      }
+      return { data: firstRow(result.data), error: result.error }
     },
-
-    // -------------------------------------------------------------------------
-    // Execute first row, allowing no result
-    // -------------------------------------------------------------------------
 
     maybeSingle: async () => {
       const result = await execute()
-
-      return {
-        data: firstRow(result.data),
-        error: result.error,
-      }
+      return { data: firstRow(result.data), error: result.error }
     },
 
-    // -------------------------------------------------------------------------
-    // Explicit execution
-    // -------------------------------------------------------------------------
-
-    execute: async () => {
-      return execute()
-    },
+    execute: async () => execute(),
   }
 
-  /*
-   * Promise-like behavior.
-   *
-   * This allows:
-   *
-   * const { data, error } =
-   *   await supabase
-   *     .from('users_profile')
-   *     .select('*')
-   *     .eq('id', userId)
-   */
-  api.then = (
-    resolve: any,
-    reject: any,
-  ) => {
-    execute()
-      .then(resolve)
-      .catch(reject)
+  api.then = (resolve: any, reject: any) => {
+    execute().then(resolve).catch(reject)
   }
 
   return api
@@ -601,17 +341,12 @@ function createTableClient(table: string): any {
 // Local storage / file API
 // -----------------------------------------------------------------------------
 
-function createStorageClient(
-  bucket: string,
-): any {
+function createStorageClient(bucket: string): any {
   return {
     upload: async (
       path: string,
       file: File | Blob,
-      options?: {
-        contentType?: string
-        upsert?: boolean
-      },
+      options?: { contentType?: string; upsert?: boolean }
     ): Promise<ApiResult<any>> => {
       try {
         const formData = new FormData()
@@ -619,50 +354,26 @@ function createStorageClient(
         formData.append(
           'file',
           file,
-          file instanceof File
-            ? file.name
-            : path.split('/').pop() ?? 'upload',
+          file instanceof File ? file.name : path.split('/').pop() ?? 'upload'
         )
-
-        formData.append(
-          'storage_path',
-          path,
-        )
-
-        formData.append(
-          'bucket',
-          bucket,
-        )
+        formData.append('storage_path', path)
+        formData.append('bucket', bucket)
 
         if (options?.contentType) {
-          formData.append(
-            'content_type',
-            options.contentType,
-          )
+          formData.append('content_type', options.contentType)
         }
 
         if (options?.upsert !== undefined) {
-          formData.append(
-            'upsert',
-            options.upsert ? '1' : '0',
-          )
+          formData.append('upsert', options.upsert ? '1' : '0')
         }
 
-        /*
-         * Do NOT manually set Content-Type.
-         * The browser must generate the multipart boundary.
-         */
-        const response = await fetch(
-          resolveApiUrl('/upload.php'),
-          {
-            method: 'POST',
-            credentials: 'include',
-            body: formData,
-          },
-        )
+        const response = await fetch(resolveApiUrl('/upload.php'), {
+          method: 'POST',
+          credentials: 'include',
+          body: formData,
+        })
 
         const text = await response.text()
-
         let json: any = null
 
         try {
@@ -684,162 +395,70 @@ function createStorageClient(
           }
         }
 
-        return {
-          data: json?.data ?? json,
-          error: null,
-        }
+        return { data: json?.data ?? json, error: null }
       } catch (error) {
         return {
           data: null,
           error: {
             message:
-              error instanceof Error
-                ? error.message
-                : 'Upload failed.',
+              error instanceof Error ? error.message : 'Upload failed.',
           },
         }
       }
     },
 
-    // -------------------------------------------------------------------------
-    // Public URL
-    // -------------------------------------------------------------------------
-
-    getPublicUrl: (
-      storagePath:
-        | string
-        | null
-        | undefined,
-    ) => {
+    getPublicUrl: (storagePath: string | null | undefined) => {
       if (!storagePath) {
-        return {
-          data: {
-            publicUrl: null,
-          },
-        }
+        return { data: { publicUrl: null } }
       }
 
       if (
         storagePath.startsWith('http://') ||
         storagePath.startsWith('https://')
       ) {
-        return {
-          data: {
-            publicUrl: storagePath,
-          },
-        }
+        return { data: { publicUrl: storagePath } }
       }
 
-      const cleanPath =
-        storagePath.replace(/^\/+/, '')
+      const cleanPath = storagePath.replace(/^\/+/, '')
+      const appPrefix = NORMALIZED_API_BASE_URL.endsWith('/api')
+        ? NORMALIZED_API_BASE_URL.slice(0, -4)
+        : ''
 
-      /*
-       * Local MATTA storage layout:
-       *
-       * /matta/storage/uploads/<path>
-       *
-       * or, if the API itself is at /api:
-       *
-       * /storage/uploads/<path>
-       */
+      const publicUrl = `${appPrefix}/storage/uploads/${cleanPath}`
 
-      const appPrefix =
-        NORMALIZED_API_BASE_URL.endsWith('/api')
-          ? NORMALIZED_API_BASE_URL.slice(
-              0,
-              -4,
-            )
-          : ''
-
-      const publicUrl =
-        `${appPrefix}/storage/uploads/${cleanPath}`
-
-      return {
-        data: {
-          publicUrl,
-        },
-      }
+      return { data: { publicUrl } }
     },
 
-    // -------------------------------------------------------------------------
-    // Signed URL replacement
-    // -------------------------------------------------------------------------
-
-    createSignedUrl: async (
-      storagePath: string,
-      _expiresIn: number,
-    ) => {
+    createSignedUrl: async (storagePath: string, _expiresIn: number) => {
       if (
         storagePath.startsWith('http://') ||
         storagePath.startsWith('https://')
       ) {
-        return {
-          data: {
-            signedUrl: storagePath,
-          },
-          error: null,
-        }
+        return { data: { signedUrl: storagePath }, error: null }
       }
 
-      const cleanPath =
-        storagePath.replace(/^\/+/, '')
+      const cleanPath = storagePath.replace(/^\/+/, '')
+      const appPrefix = NORMALIZED_API_BASE_URL.endsWith('/api')
+        ? NORMALIZED_API_BASE_URL.slice(0, -4)
+        : ''
 
-      const appPrefix =
-        NORMALIZED_API_BASE_URL.endsWith('/api')
-          ? NORMALIZED_API_BASE_URL.slice(
-              0,
-              -4,
-            )
-          : ''
+      const signedUrl = `${appPrefix}/storage/uploads/${cleanPath}`
 
-      const signedUrl =
-        `${appPrefix}/storage/uploads/${cleanPath}`
-
-      return {
-        data: {
-          signedUrl,
-        },
-        error: null,
-      }
+      return { data: { signedUrl }, error: null }
     },
 
-    // -------------------------------------------------------------------------
-    // File removal
-    // -------------------------------------------------------------------------
-
-    remove: async (
-      paths: string[],
-    ): Promise<{
-      error: ApiError | null
-    }> => {
+    remove: async (paths: string[]): Promise<{ error: ApiError | null }> => {
       if (!paths.length) {
-        return {
-          error: null,
-        }
+        return { error: null }
       }
 
-      /*
-       * The current local PHP upload endpoint may not expose a DELETE
-       * operation. Try the endpoint first.
-       *
-       * If the PHP endpoint does not support DELETE, the database row
-       * can still be removed by the calling service.
-       */
       try {
-        const result = await apiFetch(
-          '/upload.php',
-          {
-            method: 'DELETE',
-            body: JSON.stringify({
-              bucket,
-              paths,
-            }),
-          },
-        )
+        const result = await apiFetch('/upload.php', {
+          method: 'DELETE',
+          body: JSON.stringify({ bucket, paths }),
+        })
 
-        return {
-          error: result.error,
-        }
+        return { error: result.error }
       } catch (error) {
         return {
           error: {
@@ -859,73 +478,25 @@ function createStorageClient(
 // -----------------------------------------------------------------------------
 
 const _apiClient = {
-  // ===========================================================================
-  // AUTH
-  // ===========================================================================
-
   auth: {
-    async signInWithPassword({
-      email,
-      password,
-    }: {
-      email: string
-      password: string
-    }) {
-      const result =
-        await apiFetch<any>(
-          '/auth.php?action=signin',
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              email,
-              password,
-            }),
-          },
-        )
+    async signInWithPassword({ email, password }: { email: string; password: string }) {
+      const result = await apiFetch<any>('/auth.php?action=signin', {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      })
 
-      if (result.error) {
-        return {
-          data: null,
-          error: result.error,
-        }
-      }
+      if (result.error) return { data: null, error: result.error }
 
-      const data =
-        result.data ?? {
-          user: null,
-          session: null,
-        }
+      const data = result.data ?? { user: null, session: null }
+      dispatchAuthEvent('SIGNED_IN', data)
 
-      dispatchAuthEvent(
-        'SIGNED_IN',
-        data,
-      )
-
-      return {
-        data,
-        error: null,
-      }
+      return { data, error: null }
     },
 
     async signOut() {
-      const result =
-        await apiFetch(
-          '/auth.php?action=signout',
-          {
-            method: 'POST',
-          },
-        )
-
-      if (!result.error) {
-        dispatchAuthEvent(
-          'SIGNED_OUT',
-          null,
-        )
-      }
-
-      return {
-        error: result.error,
-      }
+      const result = await apiFetch('/auth.php?action=signout', { method: 'POST' })
+      if (!result.error) dispatchAuthEvent('SIGNED_OUT', null)
+      return { error: result.error }
     },
 
     async signUp({
@@ -935,218 +506,89 @@ const _apiClient = {
     }: {
       email: string
       password: string
-      options?: {
-        data?: {
-          full_name?: string
-          [key: string]: any
-        }
-      }
+      options?: { data?: { full_name?: string; [key: string]: any } }
     }) {
-      const body: any = {
-        email,
-        password,
-      }
+      const body: any = { email, password }
+      if (options?.data) Object.assign(body, options.data)
 
-      if (options?.data) {
-        Object.assign(
-          body,
-          options.data,
-        )
-      }
+      const result = await apiFetch<any>('/auth.php?action=signup', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      })
 
-      const result =
-        await apiFetch<any>(
-          '/auth.php?action=signup',
-          {
-            method: 'POST',
-            body: JSON.stringify(body),
-          },
-        )
+      if (result.error) return { data: null, error: result.error }
 
-      if (result.error) {
-        return {
-          data: null,
-          error: result.error,
-        }
-      }
+      const data = result.data ?? { user: null, session: null }
+      dispatchAuthEvent('SIGNED_IN', data)
 
-      const data =
-        result.data ?? {
-          user: null,
-          session: null,
-        }
-
-      dispatchAuthEvent(
-        'SIGNED_IN',
-        data,
-      )
-
-      return {
-        data,
-        error: null,
-      }
+      return { data, error: null }
     },
 
     async getUser() {
-      const result =
-        await apiFetch<any>(
-          '/auth.php?action=getUser',
-        )
-
+      const result = await apiFetch<any>('/auth.php?action=getUser')
       if (result.error) {
-        return {
-          data: {
-            user: null,
-          },
-          error: result.error,
-        }
+        return { data: { user: null }, error: result.error }
       }
-
-      const user =
-        result.data?.user ??
-        result.data?.session?.user ??
-        null
-
-      return {
-        data: {
-          user,
-        },
-        error: null,
-      }
+      const user = result.data?.user ?? result.data?.session?.user ?? null
+      return { data: { user }, error: null }
     },
 
     async getSession() {
-      const result =
-        await apiFetch<any>(
-          '/auth.php?action=getSession',
-        )
-
+      const result = await apiFetch<any>('/auth.php?action=getSession')
       if (result.error) {
-        return {
-          data: {
-            session: null,
-          },
-          error: result.error,
-        }
+        return { data: { session: null }, error: result.error }
       }
-
-      return {
-        data: {
-          session:
-            result.data?.session ??
-            null,
-        },
-        error: null,
-      }
+      return { data: { session: result.data?.session ?? null }, error: null }
     },
 
-    onAuthStateChange(
-      callback: (
-        event: string,
-        session: any,
-      ) => void,
-    ) {
-      const handler = (
-        event: Event,
-      ) => {
-        const detail =
-          (event as CustomEvent).detail ??
-          {}
-
-        callback(
-          detail.event,
-          detail.session ?? null,
-        )
+    onAuthStateChange(callback: (event: string, session: any) => void) {
+      const handler = (event: Event) => {
+        const detail = (event as CustomEvent).detail ?? {}
+        callback(detail.event, detail.session ?? null)
       }
 
-      window.addEventListener(
-        authEventName,
-        handler,
-      )
+      window.addEventListener(authEventName, handler)
 
       return {
         data: {
           subscription: {
             unsubscribe: () => {
-              window.removeEventListener(
-                authEventName,
-                handler,
-              )
+              window.removeEventListener(authEventName, handler)
             },
           },
         },
       }
     },
 
-    async resetPasswordForEmail(
-      email: string,
-      options?: any,
-    ) {
-      /*
-       * Keep this compatible with existing
-       * Supabase-style calls.
-       *
-       * Implement the actual password-reset
-       * email flow in PHP when needed.
-       */
-      const result =
-        await apiFetch(
-          '/auth.php?action=resetPassword',
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              email,
-              redirectTo:
-                options?.redirectTo ??
-                null,
-            }),
-          },
-        )
-
-      return {
-        error: result.error,
-      }
+    async resetPasswordForEmail(email: string, options?: any) {
+      const result = await apiFetch('/auth.php?action=resetPassword', {
+        method: 'POST',
+        body: JSON.stringify({
+          email,
+          redirectTo: options?.redirectTo ?? null,
+        }),
+      })
+      return { error: result.error }
     },
 
-    async updateUser(
-      payload: any,
-    ) {
-      const result =
-        await apiFetch(
-          '/auth.php?action=updateUser',
-          {
-            method: 'POST',
-            body: JSON.stringify(payload),
-          },
-        )
-
-      return {
-        data: result.data,
-        error: result.error,
-      }
+    async updateUser(payload: any) {
+      const result = await apiFetch('/auth.php?action=updateUser', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      })
+      return { data: result.data, error: result.error }
     },
   },
-
-  // ===========================================================================
-  // TABLE API
-  // ===========================================================================
 
   from(table: string) {
     return createTableClient(table)
   },
 
-  // ===========================================================================
-  // STORAGE API
-  // ===========================================================================
-
   storage: {
     from(bucket: string) {
-      return createStorageClient(
-        bucket,
-      )
+      return createStorageClient(bucket)
     },
   },
 }
 
-export const apiClient: any =
-  _apiClient
+export const apiClient: any = _apiClient
