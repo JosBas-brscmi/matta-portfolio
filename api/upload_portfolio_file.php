@@ -29,10 +29,10 @@ try {
     }
 
     // Extract portfolio_item_id from GET query, POST body, or REQUEST
-    $portfolioItemId = $_GET['portfolio_item_id'] 
-        ?? $_POST['portfolio_item_id'] 
-        ?? $_REQUEST['portfolio_item_id'] 
-        ?? $_REQUEST['portfolioItemId'] 
+    $portfolioItemId = $_GET['portfolio_item_id']
+        ?? $_POST['portfolio_item_id']
+        ?? $_REQUEST['portfolio_item_id']
+        ?? $_REQUEST['portfolioItemId']
         ?? null;
 
     if (!$portfolioItemId) {
@@ -101,6 +101,7 @@ try {
 
     $fileId = generate_uuid();
 
+    // Include uploaded_by in the INSERT query
     $stmt = $pdo->prepare("
         INSERT INTO portfolio_files (
             id,
@@ -109,6 +110,7 @@ try {
             file_type,
             file_size_bytes,
             storage_path,
+            uploaded_by,
             uploaded_at
         ) VALUES (
             :id,
@@ -117,6 +119,7 @@ try {
             :file_type,
             :file_size_bytes,
             :storage_path,
+            :uploaded_by,
             NOW()
         )
     ");
@@ -128,10 +131,11 @@ try {
         ':file_type' => $fileType,
         ':file_size_bytes' => $fileSize,
         ':storage_path' => $relativeStoragePath,
+        ':uploaded_by' => $userId,
     ]);
 
     $fetchStmt = $pdo->prepare("
-        SELECT id, portfolio_item_id, file_name, file_type, file_size_bytes, storage_path, uploaded_at
+        SELECT id, portfolio_item_id, file_name, file_type, file_size_bytes, storage_path, uploaded_by, uploaded_at
         FROM portfolio_files
         WHERE id = :id
         LIMIT 1
@@ -140,7 +144,7 @@ try {
     $uploadedFile = $fetchStmt->fetch(PDO::FETCH_ASSOC);
 
     json_response(['file' => $uploadedFile], 201);
-
+    
 } catch (PDOException $e) {
     error_log('[upload_portfolio_file PDO Error] ' . $e->getMessage());
     json_response([
