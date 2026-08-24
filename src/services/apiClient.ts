@@ -46,6 +46,14 @@ export function getApiUrl(path: string): string {
   return resolveApiUrl(path)
 }
 
+// Helper to safely detect FormData across different execution contexts/polyfills
+function isFormDataPayload(body: any): boolean {
+  return (
+    body instanceof FormData ||
+    (body && Object.prototype.toString.call(body) === '[object FormData]')
+  )
+}
+
 // -----------------------------------------------------------------------------
 // Generic API request
 // -----------------------------------------------------------------------------
@@ -54,16 +62,19 @@ export async function apiFetch<T = any>(
   path: string,
   options: RequestInit = {},
 ): Promise<ApiResult<T>> {
-  const headers = new Headers(options.headers)
+  const isFormData = isFormDataPayload(options.body)
+  const headers = new Headers(options.headers || {})
 
-  if (options.body instanceof FormData) {
-    // Force header removal so the browser auto-generates the multipart boundary
+  if (isFormData) {
+    // CRITICAL: Delete Content-Type so browser automatically generates boundary string
     headers.delete('Content-Type')
+    headers.delete('content-type')
   } else if (!headers.has('Content-Type') && options.body) {
     headers.set('Content-Type', 'application/json')
   }
 
   const requestOptions: RequestInit = {
+    method: 'GET',
     credentials: 'include',
     ...options,
     headers,
@@ -104,6 +115,7 @@ export async function apiFetch<T = any>(
       data: null,
       error: {
         message:
+          json?.detail ??
           json?.error ??
           json?.message ??
           `Server returned ${response.status}`,
@@ -348,63 +360,28 @@ function createStorageClient(bucket: string): any {
       file: File | Blob,
       options?: { contentType?: string; upsert?: boolean }
     ): Promise<ApiResult<any>> => {
-      try {
-        const formData = new FormData()
+      const formData = new FormData()
 
-        formData.append(
-          'file',
-          file,
-          file instanceof File ? file.name : path.split('/').pop() ?? 'upload'
-        )
-        formData.append('storage_path', path)
-        formData.append('bucket', bucket)
+      formData.append(
+        'file',
+        file,
+        file instanceof File ? file.name : path.split('/').pop() ?? 'upload'
+      )
+      formData.append('storage_path', path)
+      formData.append('bucket', bucket)
 
-        if (options?.contentType) {
-          formData.append('content_type', options.contentType)
-        }
-
-        if (options?.upsert !== undefined) {
-          formData.append('upsert', options.upsert ? '1' : '0')
-        }
-
-        const response = await fetch(resolveApiUrl('/upload.php'), {
-          method: 'POST',
-          credentials: 'include',
-          body: formData,
-        })
-
-        const text = await response.text()
-        let json: any = null
-
-        try {
-          json = text ? JSON.parse(text) : null
-        } catch {
-          json = null
-        }
-
-        if (!response.ok || json?.error) {
-          return {
-            data: null,
-            error: {
-              message:
-                json?.error?.message ??
-                json?.error ??
-                json?.message ??
-                `Upload failed: ${response.status}`,
-            },
-          }
-        }
-
-        return { data: json?.data ?? json, error: null }
-      } catch (error) {
-        return {
-          data: null,
-          error: {
-            message:
-              error instanceof Error ? error.message : 'Upload failed.',
-          },
-        }
+      if (options?.contentType) {
+        formData.append('content_type', options.contentType)
       }
+
+      if (options?.upsert !== undefined) {
+        formData.append('upsert', options.upsert ? '1' : '0')
+      }
+
+      return apiFetch('/upload.php', {
+        method: 'POST',
+        body: formData,
+      })
     },
 
     getPublicUrl: (storagePath: string | null | undefined) => {
@@ -452,23 +429,12 @@ function createStorageClient(bucket: string): any {
         return { error: null }
       }
 
-      try {
-        const result = await apiFetch('/upload.php', {
-          method: 'DELETE',
-          body: JSON.stringify({ bucket, paths }),
-        })
+      const result = await apiFetch('/upload.php', {
+        method: 'DELETE',
+        body: JSON.stringify({ bucket, paths }),
+      })
 
-        return { error: result.error }
-      } catch (error) {
-        return {
-          error: {
-            message:
-              error instanceof Error
-                ? error.message
-                : 'Unable to delete storage files.',
-          },
-        }
-      }
+      return { error: result.error }
     },
   }
 }
