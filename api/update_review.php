@@ -22,18 +22,17 @@ if (!in_array($_SERVER['REQUEST_METHOD'], ['POST', 'PUT'])) {
     exit();
 }
 
-// Database Credentials for PostgreSQL
+// Database Credentials
 $db_host = 'localhost';
-$db_port = '5432'; // Default PostgreSQL port
 $db_name = 'matta_db';
 $db_user = 'db_username';
 $db_pass = 'db_password';
 
 try {
-    $dsn = "pgsql:host={$db_host};port={$db_port};dbname={$db_name}";
-    $pdo = new PDO($dsn, $db_user, $db_pass, [
+    $pdo = new PDO("mysql:host={$db_host};dbname={$db_name};charset=utf8mb4", $db_user, $db_pass, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        PDO::ATTR_EMULATE_PREPARES => false,
     ]);
 } catch (PDOException $e) {
     http_response_code(500);
