@@ -12,6 +12,14 @@ function json_response($data, int $status = 200): void
     exit;
 }
 
+function generate_uuid(): string
+{
+    $data = random_bytes(16);
+    $data[6] = chr(ord($data[6]) & 0x0f | 0x40);
+    $data[8] = chr(ord($data[8]) & 0x3f | 0x80);
+    return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($data), 4));
+}
+
 try {
     $pdo = get_db();
 
@@ -49,8 +57,11 @@ try {
         json_response(['error' => 'Failed to save uploaded file to server.'], 500);
     }
 
+    $fileId = generate_uuid();
+
     $stmt = $pdo->prepare("
         INSERT INTO public.portfolio_files (
+            id,
             portfolio_item_id,
             file_name,
             file_type,
@@ -58,6 +69,7 @@ try {
             storage_path,
             uploaded_at
         ) VALUES (
+            :id,
             :portfolio_item_id,
             :file_name,
             :file_type,
@@ -65,10 +77,10 @@ try {
             :storage_path,
             NOW()
         )
-        RETURNING id, portfolio_item_id, file_name, file_type, file_size_bytes, storage_path, uploaded_at
     ");
 
     $stmt->execute([
+        ':id' => $fileId,
         ':portfolio_item_id' => $portfolioItemId,
         ':file_name' => $fileName,
         ':file_type' => $fileType,
@@ -76,7 +88,14 @@ try {
         ':storage_path' => $storagePath,
     ]);
 
-    $uploadedFile = $stmt->fetch(PDO::FETCH_ASSOC);
+    $fetchStmt = $pdo->prepare("
+        SELECT id, portfolio_item_id, file_name, file_type, file_size_bytes, storage_path, uploaded_at
+        FROM public.portfolio_files
+        WHERE id = :id
+        LIMIT 1
+    ");
+    $fetchStmt->execute([':id' => $fileId]);
+    $uploadedFile = $fetchStmt->fetch(PDO::FETCH_ASSOC);
 
     json_response(['file' => $uploadedFile], 201);
 
