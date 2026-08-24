@@ -28,13 +28,27 @@ try {
         json_response(['error' => 'Not signed in', 'detail' => 'Session user_id missing'], 401);
     }
 
-    $traineeId = $_POST['trainee_id'] ?? null;
-    $portfolioItemId = $_POST['portfolio_item_id'] ?? null;
+    // Support all common parameter names and methods (POST/GET/REQUEST)
+    $portfolioItemId = $_REQUEST['portfolio_item_id'] 
+        ?? $_REQUEST['portfolioItemId'] 
+        ?? $_REQUEST['portfolio_id'] 
+        ?? $_REQUEST['item_id'] 
+        ?? $_POST['portfolio_item_id'] 
+        ?? $_POST['portfolioItemId'] 
+        ?? $_POST['portfolio_id'] 
+        ?? $_POST['item_id'] 
+        ?? $_GET['portfolio_item_id'] 
+        ?? $_GET['portfolioItemId'] 
+        ?? $_GET['portfolio_id'] 
+        ?? $_GET['item_id'] 
+        ?? null;
 
-    if (!$traineeId || !$portfolioItemId) {
+    if (!$portfolioItemId) {
         json_response([
             'error' => 'Missing parameters',
-            'detail' => 'trainee_id and portfolio_item_id are required in POST body'
+            'detail' => 'portfolio_item_id is required.',
+            'received_post' => $_POST,
+            'received_get' => $_GET
         ], 400);
     }
 
