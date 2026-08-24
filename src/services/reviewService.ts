@@ -1,4 +1,4 @@
-import { apiClient as supabase } from './apiClient'
+import { apiFetch } from './apiClient'
 import { getMyTraineeId } from './traineeService'
 
 // ============================================================
@@ -38,7 +38,6 @@ export interface Review {
   created_at: string
   mt_reply: string | null
   mt_reply_at: string | null
-  // resolved client-side
   reviewer_name?: string | null
   reviewer_role?: string | null
 }
@@ -52,43 +51,28 @@ export interface ReviewInput {
   recommendation?: string | null
 }
 
-const REVIEW_SELECT = `
-  id, trainee_id, reviewer_id, review_type, review_period, rating,
-  strengths, areas_for_improvement, recommendation, reviewed_at, created_at,
-  mt_reply, mt_reply_at
-`
-
-async function attachReviewerNames(rows: Review[]): Promise<Review[]> {
-  const ids = Array.from(new Set(rows.map((r) => r.reviewer_id).filter(Boolean)))
-  if (ids.length === 0) return rows
-
-  const { data } = await supabase
-    .from('users_profile')
-    .select('id, full_name, role')
-    .in('id', ids)
-
-  const byId: Record<string, { full_name: string; role: string }> = {}
-  for (const p of data ?? []) byId[p.id] = { full_name: p.full_name, role: p.role }
-
-  return rows.map((r) => ({
-    ...r,
-    reviewer_name: byId[r.reviewer_id]?.full_name ?? null,
-    reviewer_role: byId[r.reviewer_id]?.role ?? null,
-  }))
-}
+// ============================================================
+// API Calls
+// ============================================================
 
 export async function listTraineeReviews(traineeId: string): Promise<{
   reviews: Review[]
   error: { message: string } | null
 }> {
-  const { data, error } = await supabase
-    .from('reviews')
-    .select(REVIEW_SELECT)
-    .eq('trainee_id', traineeId)
-    .order('reviewed_at', { ascending: false })
+  if (!traineeId) {
+    return { reviews: [], error: { message: 'Trainee ID is required.' } }
+  }
 
-  const rows = (data as Review[] | null) ?? []
-  return { reviews: await attachReviewerNames(rows), error }
+  const { data, error } = await apiFetch<{ reviews: Review[] } | Review[]>(
+    `/list_reviews.php?trainee_id=${encodeURIComponent(traineeId)}`
+  )
+
+  if (error) {
+    return { reviews: [], error }
+  }
+
+  const reviews = Array.isArray(data) ? data : data?.reviews ?? []
+  return { reviews, error: null }
 }
 
 export async function listMyReviews(): Promise<{
@@ -104,66 +88,80 @@ export async function createReview(
   traineeId: string,
   input: ReviewInput,
 ): Promise<{ review: Review | null; error: { message: string } | null }> {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return { review: null, error: { message: 'Not signed in' } }
+  const { data, error } = await apiFetch<{ review: Review } | Review>(
+    '/create_review.php',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        trainee_id: traineeId,
+        review_type: input.review_type,
+        review_period: input.review_period?.trim() || null,
+        rating: input.rating ?? null,
+        strengths: input.strengths?.trim() || null,
+        areas_for_improvement: input.areas_for_improvement?.trim() || null,
+        recommendation: input.recommendation?.trim() || null,
+      }),
+    }
+  )
 
-  const { data, error } = await supabase
-    .from('reviews')
-    .insert({
-      trainee_id: traineeId,
-      reviewer_id: user.id,
-      review_type: input.review_type,
-      review_period: input.review_period?.trim() || null,
-      rating: input.rating ?? null,
-      strengths: input.strengths?.trim() || null,
-      areas_for_improvement: input.areas_for_improvement?.trim() || null,
-      recommendation: input.recommendation?.trim() || null,
-    })
-    .select(REVIEW_SELECT)
-    .single()
+  if (error) {
+    return { review: null, error }
+  }
 
-  return { review: data as Review | null, error }
+  const review = (data && 'review' in data ? data.review : data) as Review
+  return { review: review ?? null, error: null }
 }
 
 export async function updateReview(
   id: string,
   input: ReviewInput,
 ): Promise<{ review: Review | null; error: { message: string } | null }> {
-  const { data, error } = await supabase
-    .from('reviews')
-    .update({
-      review_type: input.review_type,
-      review_period: input.review_period?.trim() || null,
-      rating: input.rating ?? null,
-      strengths: input.strengths?.trim() || null,
-      areas_for_improvement: input.areas_for_improvement?.trim() || null,
-      recommendation: input.recommendation?.trim() || null,
-    })
-    .eq('id', id)
-    .select(REVIEW_SELECT)
-    .single()
+  const { data, error } = await apiFetch<{ review: Review } | Review>(
+    '/update_review.php',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        id,
+        review_type: input.review_type,
+        review_period: input.review_period?.trim() || null,
+        rating: input.rating ?? null,
+        strengths: input.strengths?.trim() || null,
+        areas_for_improvement: input.areas_for_improvement?.trim() || null,
+        recommendation: input.recommendation?.trim() || null,
+      }),
+    }
+  )
 
-  return { review: data as Review | null, error }
+  if (error) {
+    return { review: null, error }
+  }
+
+  const review = (data && 'review' in data ? data.review : data) as Review
+  return { review: review ?? null, error: null }
 }
 
-export async function deleteReview(id: string) {
-  return supabase.from('reviews').delete().eq('id', id)
+export async function deleteReview(
+  id: string
+): Promise<{ error: { message: string } | null }> {
+  const { error } = await apiFetch('/delete_review.php', {
+    method: 'POST',
+    body: JSON.stringify({ id }),
+  })
+
+  return { error }
 }
 
-// -- MT replies to a feedback entry (once). Empty string clears it. --
 export async function replyToReview(
   reviewId: string,
   reply: string,
 ): Promise<{ error: { message: string } | null }> {
-  // rpc is not implemented in the local wrapper; call server endpoint instead
-  const res = await fetch(window.location.origin + '/api/reply-review.php', {
+  const { error } = await apiFetch('/reply_review.php', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ review_id: reviewId, reply }),
+    body: JSON.stringify({
+      review_id: reviewId,
+      reply: reply.trim() || null,
+    }),
   })
-  const json = await res.json()
-  const error = json?.error ?? null
+
   return { error }
 }

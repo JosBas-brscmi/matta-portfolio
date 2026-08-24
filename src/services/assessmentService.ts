@@ -1,4 +1,4 @@
-import { apiClient as supabase } from './apiClient'
+import { apiFetch } from './apiClient'
 import { getMyTraineeId } from './traineeService'
 
 // ============================================================
@@ -39,7 +39,6 @@ export interface Assessment {
   assessor_id: string | null
   comments: string | null
   created_at: string
-  // resolved client-side (FK target of assessor_id is not exposed via join)
   assessor_name?: string | null
 }
 
@@ -52,43 +51,28 @@ export interface AssessmentInput {
   comments?: string | null
 }
 
-const ASSESSMENT_SELECT = `
-  id, trainee_id, assessment_type, title, assessment_date,
-  score, max_score, assessor_id, comments, created_at
-`
-
-// Resolve assessor display names in one extra query.
-async function attachAssessorNames(rows: Assessment[]): Promise<Assessment[]> {
-  const ids = Array.from(
-    new Set(rows.map((r) => r.assessor_id).filter((v): v is string => !!v)),
-  )
-  if (ids.length === 0) return rows
-
-  const { data } = await supabase
-    .from('users_profile')
-    .select('id, full_name')
-    .in('id', ids)
-
-  const names: Record<string, string> = {}
-  for (const p of data ?? []) names[p.id] = p.full_name
-  return rows.map((r) => ({
-    ...r,
-    assessor_name: r.assessor_id ? (names[r.assessor_id] ?? null) : null,
-  }))
-}
+// ============================================================
+// API Calls
+// ============================================================
 
 export async function listTraineeAssessments(traineeId: string): Promise<{
   assessments: Assessment[]
   error: { message: string } | null
 }> {
-  const { data, error } = await supabase
-    .from('assessments')
-    .select(ASSESSMENT_SELECT)
-    .eq('trainee_id', traineeId)
-    .order('assessment_date', { ascending: false })
+  if (!traineeId) {
+    return { assessments: [], error: { message: 'Trainee ID is required.' } }
+  }
 
-  const rows = (data as Assessment[] | null) ?? []
-  return { assessments: await attachAssessorNames(rows), error }
+  const { data, error } = await apiFetch<{ assessments: Assessment[] } | Assessment[]>(
+    `/list_assessments.php?trainee_id=${encodeURIComponent(traineeId)}`
+  )
+
+  if (error) {
+    return { assessments: [], error }
+  }
+
+  const assessments = Array.isArray(data) ? data : data?.assessments ?? []
+  return { assessments, error: null }
 }
 
 export async function listMyAssessments(): Promise<{
@@ -104,60 +88,77 @@ export async function createAssessment(
   traineeId: string,
   input: AssessmentInput,
 ): Promise<{ assessment: Assessment | null; error: { message: string } | null }> {
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return { assessment: null, error: { message: 'Not signed in' } }
+  const { data, error } = await apiFetch<{ assessment: Assessment } | Assessment>(
+    '/create_assessment.php',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        trainee_id: traineeId,
+        assessment_type: input.assessment_type,
+        title: input.title.trim(),
+        assessment_date: input.assessment_date,
+        score: input.score ?? null,
+        max_score: input.max_score,
+        comments: input.comments?.trim() || null,
+      }),
+    }
+  )
 
-  const { data, error } = await supabase
-    .from('assessments')
-    .insert({
-      trainee_id: traineeId,
-      assessment_type: input.assessment_type,
-      title: input.title.trim(),
-      assessment_date: input.assessment_date,
-      score: input.score ?? null,
-      max_score: input.max_score,
-      assessor_id: user.id,
-      comments: input.comments?.trim() || null,
-    })
-    .select(ASSESSMENT_SELECT)
-    .single()
+  if (error) {
+    return { assessment: null, error }
+  }
 
-  return { assessment: data as Assessment | null, error }
+  const assessment = (data && 'assessment' in data ? data.assessment : data) as Assessment
+  return { assessment: assessment ?? null, error: null }
 }
 
 export async function updateAssessment(
   id: string,
   input: AssessmentInput,
 ): Promise<{ assessment: Assessment | null; error: { message: string } | null }> {
-  const { data, error } = await supabase
-    .from('assessments')
-    .update({
-      assessment_type: input.assessment_type,
-      title: input.title.trim(),
-      assessment_date: input.assessment_date,
-      score: input.score ?? null,
-      max_score: input.max_score,
-      comments: input.comments?.trim() || null,
-    })
-    .eq('id', id)
-    .select(ASSESSMENT_SELECT)
-    .single()
+  const { data, error } = await apiFetch<{ assessment: Assessment } | Assessment>(
+    '/update_assessment.php',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        id,
+        assessment_type: input.assessment_type,
+        title: input.title.trim(),
+        assessment_date: input.assessment_date,
+        score: input.score ?? null,
+        max_score: input.max_score,
+        comments: input.comments?.trim() || null,
+      }),
+    }
+  )
 
-  return { assessment: data as Assessment | null, error }
+  if (error) {
+    return { assessment: null, error }
+  }
+
+  const assessment = (data && 'assessment' in data ? data.assessment : data) as Assessment
+  return { assessment: assessment ?? null, error: null }
 }
 
-export async function deleteAssessment(id: string) {
-  return supabase.from('assessments').delete().eq('id', id)
+export async function deleteAssessment(
+  id: string
+): Promise<{ error: { message: string } | null }> {
+  const { error } = await apiFetch('/delete_assessment.php', {
+    method: 'POST',
+    body: JSON.stringify({ id }),
+  })
+
+  return { error }
 }
 
-// ---------- Summary (Dashboard) ----------
+// ============================================================
+// Summary (Dashboard)
+// ============================================================
 
 export interface AssessmentSummary {
   total: number
   scored: number
-  averagePct: number | null // average of score/max_score, 0–100
+  averagePct: number | null
 }
 
 export function summarize(assessments: Assessment[]): AssessmentSummary {
