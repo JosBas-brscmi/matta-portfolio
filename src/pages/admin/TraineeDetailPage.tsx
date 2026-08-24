@@ -44,6 +44,12 @@ const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
   withdrawn: { label: 'Withdrawn 退訓', cls: 'status-withdrawn' },
 }
 
+const SCROLLABLE_CONTAINER_STYLE: React.CSSProperties = {
+  maxHeight: '340px',
+  overflowY: 'auto',
+  paddingRight: '6px',
+}
+
 function formatDate(iso: string): string {
   try {
     return new Date(iso).toLocaleDateString('en-US', {
@@ -122,162 +128,47 @@ export default function TraineeDetailPage() {
 
         if (cancelled) return
 
-        // ------------------------------------------------------------
-        // Trainee profile
-        // ------------------------------------------------------------
-
         const traineeResult = results[0]
-
         if (traineeResult.status === 'rejected') {
-          setErrorMsg(
-            traineeResult.reason?.message ??
-              'Failed to load trainee profile.',
-          )
+          setErrorMsg(traineeResult.reason?.message ?? 'Failed to load trainee profile.')
         } else {
           const traineeRes = traineeResult.value
-
           if (traineeRes.error) {
             setErrorMsg(traineeRes.error.message)
           } else if (!traineeRes.trainee) {
-            setErrorMsg(
-              'Trainee not found — they may have been removed.',
-            )
+            setErrorMsg('Trainee not found — they may have been removed.')
           } else {
             setTrainee(traineeRes.trainee)
           }
         }
 
-        // ------------------------------------------------------------
-        // Training records
-        // ------------------------------------------------------------
-
         const recordsResult = results[1]
-
-        if (recordsResult.status === 'fulfilled') {
-          const recordsRes = recordsResult.value
-
-          if (!recordsRes.error) {
-            setTrainingRecords(recordsRes.records)
-          } else {
-            console.error(
-              '[TraineeDetailPage] Training records error:',
-              recordsRes.error,
-            )
-          }
-        } else {
-          console.error(
-            '[TraineeDetailPage] Training records request failed:',
-            recordsResult.reason,
-          )
+        if (recordsResult.status === 'fulfilled' && !recordsResult.value.error) {
+          setTrainingRecords(recordsResult.value.records)
         }
-
-        // ------------------------------------------------------------
-        // Training progress
-        // ------------------------------------------------------------
 
         const progressResult = results[2]
-
-        if (progressResult.status === 'fulfilled') {
-          const progressRes = progressResult.value
-
-          if (!progressRes.error) {
-            setTrainingProgress(progressRes.progress)
-          } else {
-            console.error(
-              '[TraineeDetailPage] Training progress error:',
-              progressRes.error,
-            )
-          }
-        } else {
-          console.error(
-            '[TraineeDetailPage] Training progress request failed:',
-            progressResult.reason,
-          )
+        if (progressResult.status === 'fulfilled' && !progressResult.value.error) {
+          setTrainingProgress(progressResult.value.progress)
         }
-
-        // ------------------------------------------------------------
-        // Portfolio
-        // ------------------------------------------------------------
 
         const portfolioResult = results[3]
-
-        if (portfolioResult.status === 'fulfilled') {
-          const portfolioRes = portfolioResult.value
-
-          if (!portfolioRes.error) {
-            setPortfolioItems(portfolioRes.items)
-          } else {
-            console.error(
-              '[TraineeDetailPage] Portfolio error:',
-              portfolioRes.error,
-            )
-          }
-        } else {
-          console.error(
-            '[TraineeDetailPage] Portfolio request failed:',
-            portfolioResult.reason,
-          )
+        if (portfolioResult.status === 'fulfilled' && !portfolioResult.value.error) {
+          setPortfolioItems(portfolioResult.value.items)
         }
-
-        // ------------------------------------------------------------
-        // Assessments
-        // ------------------------------------------------------------
 
         const assessmentResult = results[4]
-
-        if (assessmentResult.status === 'fulfilled') {
-          const assessRes = assessmentResult.value
-
-          if (!assessRes.error) {
-            setAssessments(assessRes.assessments)
-          } else {
-            console.error(
-              '[TraineeDetailPage] Assessments error:',
-              assessRes.error,
-            )
-          }
-        } else {
-          console.error(
-            '[TraineeDetailPage] Assessments request failed:',
-            assessmentResult.reason,
-          )
+        if (assessmentResult.status === 'fulfilled' && !assessmentResult.value.error) {
+          setAssessments(assessmentResult.value.assessments)
         }
 
-        // ------------------------------------------------------------
-        // Reviews
-        // ------------------------------------------------------------
-
         const reviewResult = results[5]
-
-        if (reviewResult.status === 'fulfilled') {
-          const reviewRes = reviewResult.value
-
-          if (!reviewRes.error) {
-            setReviews(reviewRes.reviews)
-          } else {
-            console.error(
-              '[TraineeDetailPage] Reviews error:',
-              reviewRes.error,
-            )
-          }
-        } else {
-          console.error(
-            '[TraineeDetailPage] Reviews request failed:',
-            reviewResult.reason,
-          )
+        if (reviewResult.status === 'fulfilled' && !reviewResult.value.error) {
+          setReviews(reviewResult.value.reviews)
         }
       } catch (error) {
         if (!cancelled) {
-          console.error(
-            '[TraineeDetailPage] Unexpected loading error:',
-            error,
-          )
-
-          setErrorMsg(
-            error instanceof Error
-              ? error.message
-              : 'Failed to load trainee details.',
-          )
+          setErrorMsg(error instanceof Error ? error.message : 'Failed to load trainee details.')
         }
       } finally {
         if (!cancelled) {
@@ -314,14 +205,13 @@ export default function TraineeDetailPage() {
     window.open(url, '_blank', 'noopener')
   }
 
-  const canEdit =
-    viewerProfile?.role === 'owner' || viewerProfile?.role === 'ma_center'
+  const canEdit = viewerProfile?.role === 'owner' || viewerProfile?.role === 'ma_center'
 
   if (loading) {
     return (
       <div className="dashboard-content">
         <div className="empty-state">
-          <p className="empty-state-desc">Loading trainee details\u2026</p>
+          <p className="empty-state-desc">Loading trainee details…</p>
         </div>
       </div>
     )
@@ -354,18 +244,16 @@ export default function TraineeDetailPage() {
       <div className="page-header detail-header">
         <div>
           <p className="page-eyebrow">Trainee profile 學員資料</p>
-          <h1 className="page-title">
-            {trainee.users_profile?.full_name ?? 'Unknown trainee'}
-          </h1>
+          <h1 className="page-title">{trainee.users_profile?.full_name ?? 'Unknown trainee'}</h1>
           <div className="detail-meta">
             <span className={`status-pill ${status.cls}`}>{status.label}</span>
-            <span className="meta-separator">\u00B7</span>
+            <span className="meta-separator">·</span>
             <span>{trainee.batch_code}</span>
-            <span className="meta-separator">\u00B7</span>
+            <span className="meta-separator">·</span>
             <span>
               <code className="mono-small">{trainee.employee_id}</code>
             </span>
-            <span className="meta-separator">\u00B7</span>
+            <span className="meta-separator">·</span>
             <span>Onboarded {formatDate(trainee.onboard_date)}</span>
           </div>
         </div>
@@ -389,10 +277,7 @@ export default function TraineeDetailPage() {
           <span className="muted">{trainee.profile_completeness}%</span>
         </div>
         <div className="progress-bar">
-          <div
-            className="progress-fill"
-            style={{ width: `${trainee.profile_completeness}%` }}
-          />
+          <div className="progress-fill" style={{ width: `${trainee.profile_completeness}%` }} />
         </div>
       </div>
 
@@ -405,11 +290,11 @@ export default function TraineeDetailPage() {
           <dl className="dashboard-meta">
             <div>
               <dt>Email</dt>
-              <dd>{trainee.users_profile?.email ?? '\u2014'}</dd>
+              <dd>{trainee.users_profile?.email ?? '—'}</dd>
             </div>
             <div>
               <dt>English name</dt>
-              <dd>{trainee.users_profile?.english_name ?? '\u2014'}</dd>
+              <dd>{trainee.users_profile?.english_name ?? '—'}</dd>
             </div>
             <div>
               <dt>Education</dt>
@@ -464,9 +349,7 @@ export default function TraineeDetailPage() {
             <div>
               <dt>Account status</dt>
               <dd>
-                <span
-                  className={`status-pill status-${trainee.users_profile?.status ?? 'inactive'}`}
-                >
+                <span className={`status-pill status-${trainee.users_profile?.status ?? 'inactive'}`}>
                   {trainee.users_profile?.status ?? 'unknown'}
                 </span>
               </dd>
@@ -479,8 +362,9 @@ export default function TraineeDetailPage() {
         </div>
       </section>
 
-      {/* Future sections */}
+      {/* Fixed-size scrollable cards */}
       <section className="detail-sections">
+        {/* Training Records Card */}
         <div className="dashboard-card training-records-card">
           <div className="dashboard-card-header">
             <h2>Training records 訓練紀錄</h2>
@@ -520,36 +404,25 @@ export default function TraineeDetailPage() {
           )}
           {trainingRecords.length === 0 ? (
             <p className="dashboard-card-body muted">
-              No training records yet. Records will appear here once the trainee
-              starts logging their learning journey.
+              No training records yet. Records will appear here once the trainee starts logging their learning journey.
             </p>
           ) : (
-            <div className="training-records-mini">
-              {trainingRecords.slice(0, 5).map((r) => (
+            <div className="training-records-mini" style={SCROLLABLE_CONTAINER_STYLE}>
+              {trainingRecords.map((r) => (
                 <div key={r.id} className="training-record-mini">
                   <span className="training-record-mini-date">
                     {new Date(r.attendance_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                   </span>
-                  <span className="training-record-mini-title">
-                    {r.course?.course_name ?? 'Unnamed'}
-                  </span>
-                  <span className="training-record-mini-hours">
-                    {Number(r.hours).toFixed(1)}h
-                  </span>
-                  {r.test_score != null && (
-                    <span className="training-record-mini-score">{r.test_score}</span>
-                  )}
+                  <span className="training-record-mini-title">{r.course?.course_name ?? 'Unnamed'}</span>
+                  <span className="training-record-mini-hours">{Number(r.hours).toFixed(1)}h</span>
+                  {r.test_score != null && <span className="training-record-mini-score">{r.test_score}</span>}
                 </div>
               ))}
-              {trainingRecords.length > 5 && (
-                <p className="training-records-more muted">
-                  + {trainingRecords.length - 5} more entries
-                </p>
-              )}
             </div>
           )}
         </div>
 
+        {/* Portfolio Card */}
         <div className="dashboard-card">
           <div className="dashboard-card-header">
             <h2>Portfolio items 學習檔案</h2>
@@ -557,26 +430,19 @@ export default function TraineeDetailPage() {
           </div>
           {portfolioItems.length === 0 ? (
             <p className="dashboard-card-body muted">
-              No portfolio items yet. Uploaded reflections, projects,
-              presentations, and QCC reports will appear here.
+              No portfolio items yet. Uploaded reflections, projects, presentations, and QCC reports will appear here.
             </p>
           ) : (
-            <div className="portfolio-mini-list">
+            <div className="portfolio-mini-list" style={SCROLLABLE_CONTAINER_STYLE}>
               {portfolioItems.map((item) => (
                 <div key={item.id} className="portfolio-mini">
                   <div className="portfolio-mini-head">
                     <span className={`pf-status pf-status-${item.status}`}>
-                      {item.status === 'pending'
-                        ? 'Pending'
-                        : item.status === 'approved'
-                          ? 'Approved'
-                          : 'Returned'}
+                      {item.status === 'pending' ? 'Pending' : item.status === 'approved' ? 'Approved' : 'Returned'}
                     </span>
                     <span className="portfolio-mini-title">{item.title}</span>
                     {item.category && (
-                      <span className="pf-category">
-                        {CATEGORY_LABEL[item.category] ?? item.category}
-                      </span>
+                      <span className="pf-category">{CATEGORY_LABEL[item.category] ?? item.category}</span>
                     )}
                   </div>
                   {item.portfolio_files.length > 0 && (
@@ -593,9 +459,7 @@ export default function TraineeDetailPage() {
                             <Icon name="folder" size={13} />
                             <span className="file-chip-name">{f.file_name}</span>
                             <span className="file-chip-size">
-                              {downloadingId === f.id
-                                ? 'Opening…'
-                                : formatBytes(f.file_size_bytes)}
+                              {downloadingId === f.id ? 'Opening…' : formatBytes(f.file_size_bytes)}
                             </span>
                           </button>
                         </li>
@@ -608,6 +472,7 @@ export default function TraineeDetailPage() {
           )}
         </div>
 
+        {/* Assessments Card */}
         <div className="dashboard-card">
           <div className="dashboard-card-header">
             <h2>Assessments 評量</h2>
@@ -628,12 +493,11 @@ export default function TraineeDetailPage() {
           </div>
           {assessments.length === 0 ? (
             <p className="dashboard-card-body muted">
-              No assessments yet. Use + to record entrance tests, quizzes,
-              mid-term and final assessments.
+              No assessments yet. Use + to record entrance tests, quizzes, mid-term and final assessments.
             </p>
           ) : (
-            <div className="assessment-mini-list">
-              {assessments.slice(0, 6).map((a) => (
+            <div className="assessment-mini-list" style={SCROLLABLE_CONTAINER_STYLE}>
+              {assessments.map((a) => (
                 <button
                   key={a.id}
                   type="button"
@@ -659,15 +523,11 @@ export default function TraineeDetailPage() {
                   </span>
                 </button>
               ))}
-              {assessments.length > 6 && (
-                <p className="training-records-more muted">
-                  + {assessments.length - 6} more
-                </p>
-              )}
             </div>
           )}
         </div>
 
+        {/* Reviews / Feedback Card */}
         <div className="dashboard-card">
           <div className="dashboard-card-header">
             <h2>Mentor &amp; manager feedback 導師與主管回饋</h2>
@@ -688,12 +548,11 @@ export default function TraineeDetailPage() {
           </div>
           {reviews.length === 0 ? (
             <p className="dashboard-card-body muted">
-              No feedback yet. Use + to write weekly notes, monthly reviews, or
-              a short encouragement — the trainee will see it right away.
+              No feedback yet. Use + to write weekly notes, monthly reviews, or a short encouragement — the trainee will see it right away.
             </p>
           ) : (
-            <div className="review-feed">
-              {reviews.slice(0, 5).map((r) => {
+            <div className="review-feed" style={SCROLLABLE_CONTAINER_STYLE}>
+              {reviews.map((r) => {
                 const mine = r.reviewer_id === viewerProfile?.id
                 return (
                   <div key={r.id} className="review-entry">
@@ -701,9 +560,7 @@ export default function TraineeDetailPage() {
                       <span className="pf-category">
                         {REVIEW_TYPE_LABEL[r.review_type ?? ''] ?? r.review_type ?? 'Feedback'}
                       </span>
-                      {r.review_period && (
-                        <span className="review-entry-period">{r.review_period}</span>
-                      )}
+                      {r.review_period && <span className="review-entry-period">{r.review_period}</span>}
                       {r.rating != null && (
                         <span className="review-entry-stars">
                           {'★'.repeat(r.rating)}
@@ -746,8 +603,7 @@ export default function TraineeDetailPage() {
                       </p>
                     )}
                     <p className="review-entry-byline">
-                      — {r.reviewer_name ?? 'Unknown'} ·{' '}
-                      {formatDate(r.reviewed_at)}
+                      — {r.reviewer_name ?? 'Unknown'} · {formatDate(r.reviewed_at)}
                     </p>
                     {r.mt_reply && (
                       <div className="mt-reply readonly">
@@ -760,9 +616,6 @@ export default function TraineeDetailPage() {
                   </div>
                 )
               })}
-              {reviews.length > 5 && (
-                <p className="training-records-more muted">+ {reviews.length - 5} more</p>
-              )}
             </div>
           )}
         </div>
