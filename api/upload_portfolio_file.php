@@ -42,11 +42,36 @@ try {
         ], 400);
     }
 
+    // Comprehensive file upload & PHP limit checking
     if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
-        $uploadErrCode = $_FILES['file']['error'] ?? 'No file received in $_FILES';
+        $errorCode = $_FILES['file']['error'] ?? null;
+
+        $errorMap = [
+            UPLOAD_ERR_INI_SIZE   => 'The file exceeds upload_max_filesize in php.ini.',
+            UPLOAD_ERR_FORM_SIZE  => 'The file exceeds MAX_FILE_SIZE in the form.',
+            UPLOAD_ERR_PARTIAL    => 'The file was only partially uploaded.',
+            UPLOAD_ERR_NO_FILE    => 'No file was selected for upload.',
+            UPLOAD_ERR_NO_TMP_DIR => 'Missing temporary upload directory on the server.',
+            UPLOAD_ERR_CANT_WRITE => 'Failed to write file to disk (check folder permissions).',
+            UPLOAD_ERR_EXTENSION  => 'A PHP extension stopped the file upload.',
+        ];
+
+        $detail = $errorMap[$errorCode] ?? 'No file received in $_FILES.';
+
+        // Detect if payload exceeded post_max_size (PHP silently empties $_POST and $_FILES)
+        $contentLength = (int)($_SERVER['CONTENT_LENGTH'] ?? 0);
+        if (empty($_FILES) && empty($_POST) && $contentLength > 0) {
+            $detail = 'Upload exceeds post_max_size in php.ini, causing PHP to discard the request.';
+        }
+
         json_response([
             'error' => 'File upload error',
-            'detail' => 'PHP upload error code: ' . $uploadErrCode
+            'detail' => $detail,
+            'debug' => [
+                'php_error_code' => $errorCode,
+                'files_received_keys' => array_keys($_FILES),
+                'content_length_bytes' => $contentLength,
+            ]
         ], 400);
     }
 
