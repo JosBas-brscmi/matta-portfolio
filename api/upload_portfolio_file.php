@@ -36,31 +36,39 @@ try {
     }
 
     if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
-        json_response(['error' => 'File upload error or no file uploaded.'], 400);
+        $uploadErrCode = $_FILES['file']['error'] ?? 'No file provided';
+        json_response(['error' => 'File upload error code: ' . $uploadErrCode], 400);
     }
 
     $file = $_FILES['file'];
-    $fileName = $file['name'];
+    $fileName = basename($file['name']);
     $fileType = $file['type'];
     $fileSize = $file['size'];
 
+    // Ensure uploads directory exists and is writable
     $uploadDir = __DIR__ . '/uploads/portfolio/';
     if (!is_dir($uploadDir)) {
-        mkdir($uploadDir, 0755, true);
+        if (!mkdir($uploadDir, 0777, true) && !is_dir($uploadDir)) {
+            json_response(['error' => 'Failed to create upload directory on server.'], 500);
+        }
     }
 
     $ext = pathinfo($fileName, PATHINFO_EXTENSION);
-    $storagePath = 'portfolio/' . uniqid() . '_' . time() . '.' . $ext;
-    $destination = __DIR__ . '/uploads/' . $storagePath;
+    $relativeStoragePath = 'portfolio/' . uniqid() . '_' . time() . ($ext ? '.' . $ext : '');
+    $destination = __DIR__ . '/uploads/' . $relativeStoragePath;
 
     if (!move_uploaded_file($file['tmp_name'], $destination)) {
-        json_response(['error' => 'Failed to save uploaded file to server.'], 500);
+        $lastErr = error_get_last();
+        json_response([
+            'error' => 'Failed to save uploaded file to server.',
+            'detail' => $lastErr['message'] ?? 'Check write permissions on /api/uploads/ folder.'
+        ], 500);
     }
 
     $fileId = generate_uuid();
 
     $stmt = $pdo->prepare("
-        INSERT INTO public.portfolio_files (
+        INSERT INTO portfolio_files (
             id,
             portfolio_item_id,
             file_name,
@@ -85,12 +93,12 @@ try {
         ':file_name' => $fileName,
         ':file_type' => $fileType,
         ':file_size_bytes' => $fileSize,
-        ':storage_path' => $storagePath,
+        ':storage_path' => $relativeStoragePath,
     ]);
 
     $fetchStmt = $pdo->prepare("
         SELECT id, portfolio_item_id, file_name, file_type, file_size_bytes, storage_path, uploaded_at
-        FROM public.portfolio_files
+        FROM portfolio_files
         WHERE id = :id
         LIMIT 1
     ");
