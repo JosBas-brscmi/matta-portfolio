@@ -27,9 +27,10 @@ export default function ChangePasswordCard() {
     setSubmitting(false)
 
     if (error) {
-        setErrorMsg((error as any)?.message)
+      setErrorMsg((error as any)?.message)
       return
     }
+
     setNewPassword('')
     setConfirmPassword('')
     setSuccessMsg('Password changed. 密碼已更新。')

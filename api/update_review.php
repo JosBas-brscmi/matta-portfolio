@@ -3,7 +3,7 @@
 
 header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: PUT, POST, OPTIONS');
+header('Access-Control-Allow-Methods: POST, PUT, OPTIONS');
 header('Access-Control-Allow-Headers: Content-Type, Authorization');
 
 // Handle CORS preflight request
@@ -43,14 +43,9 @@ try {
     exit();
 }
 
-// Retrieve and parse JSON payload
+// Retrieve and parse JSON payload with $_POST fallback
 $inputRaw = file_get_contents('php://input');
-$data = json_decode($inputRaw, true);
-
-// Fallback to standard $_POST if JSON parsing returns null
-if (!$data) {
-    $data = $_POST;
-}
+$data = json_decode($inputRaw, true) ?? $_POST;
 
 // Input Validation
 $review_id = $data['id'] ?? null;
@@ -67,7 +62,7 @@ if (!$review_id) {
 // Extract updated fields with default nulls if omitted
 $review_type = isset($data['review_type']) ? trim($data['review_type']) : null;
 $review_period = isset($data['review_period']) ? trim($data['review_period']) : null;
-$rating = isset($data['rating']) ? filter_var($data['rating'], FILTER_VALIDATE_INT) : null;
+$rating = isset($data['rating']) && is_numeric($data['rating']) ? (int)$data['rating'] : null;
 $strengths = isset($data['strengths']) ? trim($data['strengths']) : null;
 $areas_for_improvement = isset($data['areas_for_improvement']) ? trim($data['areas_for_improvement']) : null;
 $recommendation = isset($data['recommendation']) ? trim($data['recommendation']) : null;
@@ -105,7 +100,7 @@ try {
     $stmt->execute([
         ':review_type' => $review_type,
         ':review_period' => $review_period,
-        ':rating' => $rating !== false ? $rating : null,
+        ':rating' => $rating,
         ':strengths' => $strengths,
         ':areas_for_improvement' => $areas_for_improvement,
         ':recommendation' => $recommendation,

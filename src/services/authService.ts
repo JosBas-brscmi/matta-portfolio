@@ -114,13 +114,6 @@ function normalizeUser(user: AuthUser | undefined | null): AuthUser | null {
   }
 }
 
-/**
- * Notify AuthContext that the authentication state changed.
- *
- * The local PHP backend uses a PHP session cookie rather than Supabase's
- * browser auth state. This event keeps the existing AuthContext listener
- * synchronized with that local session.
- */
 function dispatchAuthEvent(
   event: 'SIGNED_IN' | 'SIGNED_OUT',
   session: AuthSession | null = null,
@@ -279,11 +272,6 @@ export async function signInWithEmail(
       user: user ?? session.user ?? null,
     }
 
-    /*
-     * IMPORTANT:
-     * AuthContext listens for this event. Without this event, login can
-     * succeed in PHP while AuthContext.user remains null.
-     */
     dispatchAuthEvent('SIGNED_IN', normalizedSession)
 
     return {
@@ -550,7 +538,10 @@ export async function updateOwnPassword(password: string) {
         method: 'POST',
         headers: getHeaders(),
         credentials: 'include',
-        body: JSON.stringify({ password }),
+        body: JSON.stringify({
+          password: password,
+          new_password: password,
+        }),
       },
     )
 
