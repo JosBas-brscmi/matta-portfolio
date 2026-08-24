@@ -290,8 +290,11 @@ export async function uploadPortfolioFiles(
     formData.append('portfolio_item_id', portfolioItemId)
     formData.append('file', file)
 
+    // Pass IDs in query string AND body so PHP finds them in $_GET, $_POST, or $_REQUEST
+    const endpoint = `/upload_portfolio_file.php?portfolio_item_id=${encodeURIComponent(portfolioItemId)}&trainee_id=${encodeURIComponent(traineeId)}`
+
     const { data, error } = await apiFetch<{ file?: PortfolioFile; data?: PortfolioFile } | PortfolioFile>(
-      '/upload_portfolio_file.php',
+      endpoint,
       {
         method: 'POST',
         body: formData,
