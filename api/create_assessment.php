@@ -32,17 +32,21 @@ try {
     $data = json_decode($rawInput, true) ?? $_POST;
 
     $traineeId = $data['trainee_id'] ?? $data['traineeId'] ?? null;
+    // Fallback assessor_id to current logged in user if not sent in payload
+    $assessorId = $data['assessor_id'] ?? $data['assessorId'] ?? $userId; 
     $assessmentType = $data['assessment_type'] ?? 'course_quiz';
     $title = trim($data['title'] ?? '');
     $assessmentDate = $data['assessment_date'] ?? date('Y-m-d');
-    $score = isset($data['score']) && $data['score'] !== '' ? (float)$data['score'] : null;
-    $maxScore = isset($data['max_score']) ? (float)$data['max_score'] : 100.0;
+    
+    // NOT NULL columns: force default numeric values if not passed
+    $score = isset($data['score']) && $data['score'] !== '' ? (float)$data['score'] : 0.0;
+    $maxScore = isset($data['max_score']) && $data['max_score'] !== '' ? (float)$data['max_score'] : 100.0;
     $comments = trim($data['comments'] ?? '');
 
-    if (!$traineeId || empty($title)) {
+    if (!$traineeId || empty($title) || !$assessorId) {
         json_response([
             'error' => 'Missing parameters',
-            'detail' => 'trainee_id and title are required.'
+            'detail' => 'trainee_id, assessor_id, and title are required.'
         ], 400);
     }
 
@@ -52,22 +56,26 @@ try {
         INSERT INTO assessments (
             id,
             trainee_id,
+            assessor_id,
             assessment_type,
             title,
             assessment_date,
             score,
             max_score,
             comments,
-            created_at
+            created_at,
+            updated_at
         ) VALUES (
             :id,
             :trainee_id,
+            :assessor_id,
             :assessment_type,
             :title,
             :assessment_date,
             :score,
             :max_score,
             :comments,
+            NOW(),
             NOW()
         )
     ");
@@ -75,6 +83,7 @@ try {
     $stmt->execute([
         ':id'              => $id,
         ':trainee_id'      => $traineeId,
+        ':assessor_id'     => $assessorId,
         ':assessment_type' => $assessmentType,
         ':title'           => $title,
         ':assessment_date' => $assessmentDate,
@@ -84,7 +93,7 @@ try {
     ]);
 
     $fetchStmt = $pdo->prepare("
-        SELECT id, trainee_id, assessment_type, title, assessment_date, score, max_score, comments, created_at
+        SELECT id, trainee_id, assessor_id, assessment_type, title, assessment_date, score, max_score, comments, created_at, updated_at
         FROM assessments
         WHERE id = :id
         LIMIT 1

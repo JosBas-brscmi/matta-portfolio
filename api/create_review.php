@@ -32,10 +32,16 @@ try {
     $data = json_decode($rawInput, true) ?? $_POST;
 
     $traineeId = $data['trainee_id'] ?? $data['traineeId'] ?? null;
-    $reviewDate = $data['review_date'] ?? date('Y-m-d');
+    $reviewerId = $data['reviewer_id'] ?? $data['reviewerId'] ?? $userId;
+    $reviewType = $data['review_type'] ?? 'performance';
+    $reviewPeriod = $data['review_period'] ?? date('Y-m');
     $rating = isset($data['rating']) && $data['rating'] !== '' ? (float)$data['rating'] : null;
-    $comments = trim($data['comments'] ?? $data['feedback'] ?? '');
-    $reviewer = trim($data['reviewer'] ?? '');
+    
+    // Map feedback/comments to strengths if explicit strengths are not provided
+    $strengths = trim($data['strengths'] ?? $data['comments'] ?? $data['feedback'] ?? '');
+    $areasForImprovement = trim($data['areas_for_improvement'] ?? $data['areasForImprovement'] ?? '');
+    $recommendation = trim($data['recommendation'] ?? '');
+    $reviewedAt = $data['reviewed_at'] ?? $data['review_date'] ?? date('Y-m-d H:i:s');
 
     if (!$traineeId) {
         json_response([
@@ -50,33 +56,47 @@ try {
         INSERT INTO reviews (
             id,
             trainee_id,
-            review_date,
+            reviewer_id,
+            review_type,
+            review_period,
             rating,
-            comments,
-            reviewer,
-            created_at
+            strengths,
+            areas_for_improvement,
+            recommendation,
+            reviewed_at,
+            created_at,
+            updated_at
         ) VALUES (
             :id,
             :trainee_id,
-            :review_date,
+            :reviewer_id,
+            :review_type,
+            :review_period,
             :rating,
-            :comments,
-            :reviewer,
+            :strengths,
+            :areas_for_improvement,
+            :recommendation,
+            :reviewed_at,
+            NOW(),
             NOW()
         )
     ");
 
     $stmt->execute([
-        ':id'          => $id,
-        ':trainee_id'  => $traineeId,
-        ':review_date' => $reviewDate,
-        ':rating'      => $rating,
-        ':comments'    => $comments,
-        ':reviewer'    => $reviewer,
+        ':id'                    => $id,
+        ':trainee_id'            => $traineeId,
+        ':reviewer_id'           => $reviewerId,
+        ':review_type'           => $reviewType,
+        ':review_period'         => $reviewPeriod,
+        ':rating'                => $rating,
+        ':strengths'             => $strengths,
+        ':areas_for_improvement' => $areasForImprovement,
+        ':recommendation'        => $recommendation,
+        ':reviewed_at'           => $reviewedAt,
     ]);
 
     $fetchStmt = $pdo->prepare("
-        SELECT id, trainee_id, review_date, rating, comments, reviewer, created_at
+        SELECT id, trainee_id, reviewer_id, review_type, review_period, rating, strengths, areas_for_improvement, recommendation, reviewed_at, created_at, updated_at
         FROM reviews
         WHERE id = :id
         LIMIT 1
