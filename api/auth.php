@@ -95,6 +95,36 @@ try {
         json(['data' => ['session' => ['user' => $userObj], 'user' => $userObj]]);
     }
 
+    // Update password handler
+    if (($action === 'update-password' || $action === 'update_password' || $action === 'change-password') && $_SERVER['REQUEST_METHOD'] === 'POST') {
+        $uid = $_SESSION['user_id'] ?? null;
+        if (!$uid) {
+            http_response_code(401);
+            json(['error' => 'unauthorized', 'message' => 'Session expired. Please sign in again.']);
+        }
+
+        $body = $inputBody;
+        $password = $body['password'] ?? ($body['new_password'] ?? '');
+
+        if (!$password || strlen($password) < 8) {
+            http_response_code(400);
+            json(['error' => 'password_too_short', 'message' => 'Password must be at least 8 characters.']);
+        }
+
+        $pwdHash = password_hash($password, PASSWORD_DEFAULT);
+
+        // Update local_auth table
+        $up = $pdo->prepare('UPDATE public.local_auth SET password_hash = :pwd WHERE user_id = :user_id');
+        $up->execute([':pwd' => $pwdHash, ':user_id' => $uid]);
+
+        // Update updated_at timestamp in users_profile
+        $now = (new DateTime('now'))->format('Y-m-d H:i:s.uP');
+        $upProfile = $pdo->prepare('UPDATE public.users_profile SET updated_at = :updated_at WHERE id = :id');
+        $upProfile->execute([':updated_at' => $now, ':id' => $uid]);
+
+        json(['ok' => true, 'message' => 'Password changed successfully.']);
+    }
+
     // default
     http_response_code(400);
     json(['error' => 'unknown_action']);
