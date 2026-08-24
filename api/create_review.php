@@ -34,10 +34,16 @@ try {
     $traineeId = $data['trainee_id'] ?? $data['traineeId'] ?? null;
     $reviewerId = $data['reviewer_id'] ?? $data['reviewerId'] ?? $userId;
     $reviewType = $data['review_type'] ?? 'performance';
-    $reviewPeriod = $data['review_period'] ?? date('Y-m');
-    $rating = isset($data['rating']) && $data['rating'] !== '' ? (float)$data['rating'] : null;
     
-    // Map feedback/comments to strengths if explicit strengths are not provided
+    // Convert YYYY-MM inputs (e.g. "2026-08") to a valid DATE format ("2026-08-01")
+    $rawPeriod = $data['review_period'] ?? date('Y-m-01');
+    if (preg_match('/^\d{4}-\d{2}$/', $rawPeriod)) {
+        $reviewPeriod = $rawPeriod . '-01';
+    } else {
+        $reviewPeriod = $rawPeriod;
+    }
+
+    $rating = isset($data['rating']) && $data['rating'] !== '' ? (float)$data['rating'] : null;
     $strengths = trim($data['strengths'] ?? $data['comments'] ?? $data['feedback'] ?? '');
     $areasForImprovement = trim($data['areas_for_improvement'] ?? $data['areasForImprovement'] ?? '');
     $recommendation = trim($data['recommendation'] ?? '');
