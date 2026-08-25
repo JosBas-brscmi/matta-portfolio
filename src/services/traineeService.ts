@@ -450,36 +450,22 @@ export async function listTraineeTrainingRecords(
   traineeId: string,
 ): Promise<{
   records: TrainingRecord[]
-  error: {
-    message: string
-  } | null
+  error: { message: string } | null
 }> {
   if (!traineeId) {
     return {
       records: [],
-      error: {
-        message:
-          'Trainee ID is required.',
-      },
+      error: { message: 'Trainee ID is required.' },
     }
   }
 
-  const {
-    data,
-    error,
-  } = await apiFetch<{
-    records: TrainingRecord[]
-  }>(
-    `/list_trainee_training_records.php?trainee_id=${encodeURIComponent(
-      traineeId,
-    )}`,
+  const { data, error } = await apiFetch<{ records: TrainingRecord[] } | TrainingRecord[]>(
+    `/list_trainee_training_records.php?trainee_id=${encodeURIComponent(traineeId)}`,
   )
 
-  return {
-    records:
-      data?.records ?? [],
-    error,
-  }
+  const records = Array.isArray(data) ? data : (data?.records ?? [])
+
+  return { records, error }
 }
 
 export async function createMyTrainingRecord(

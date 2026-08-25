@@ -165,7 +165,7 @@ const computedProgress = useMemo(() => {
           if (val?.error) {
             console.error('[TrainingRecords Error]:', val.error)
           } else {
-            const rawRecords = val?.records ?? val?.records ?? (Array.isArray(val) ? val : [])
+            const rawRecords = val?.records ?? []
             setTrainingRecords(Array.isArray(rawRecords) ? rawRecords : [])
           }
         }

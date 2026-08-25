@@ -154,7 +154,7 @@ try {
         ];
     }
 
-    json_response(['records' => $records, 'data' => $records], 200);
+    json_response(['records' => $records], 200);
 
 } catch (Throwable $e) {
     error_log('list_trainee_training_records.php: ' . $e->getMessage());
