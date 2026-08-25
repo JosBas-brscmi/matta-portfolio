@@ -181,8 +181,14 @@ export default function TraineeDetailPage() {
         }
 
         const recordsResult = results[1]
-        if (recordsResult.status === 'fulfilled' && !recordsResult.value.error) {
-          setTrainingRecords(recordsResult.value.records)
+        if (recordsResult.status === 'fulfilled') {
+          const val = recordsResult.value
+          if (val?.error) {
+            console.error('[TrainingRecords Error]:', val.error)
+          } else {
+            const rawRecords = val?.records ?? val?.records ?? (Array.isArray(val) ? val : [])
+            setTrainingRecords(Array.isArray(rawRecords) ? rawRecords : [])
+          }
         }
 
         const progressResult = results[2]

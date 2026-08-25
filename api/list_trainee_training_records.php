@@ -75,13 +75,18 @@ try {
         json_response(['error' => 'Forbidden', 'message' => 'You are not authorized to view this trainee.'], 403);
     }
 
-    $traineeCheckStmt = $db->prepare("SELECT id FROM public.trainees WHERE id = :trainee_id LIMIT 1");
+    // Fetch trainee record to obtain both trainees.id and trainees.user_id
+    $traineeCheckStmt = $db->prepare("SELECT id, user_id FROM public.trainees WHERE id = :trainee_id LIMIT 1");
     $traineeCheckStmt->execute([':trainee_id' => $traineeId]);
+    $traineeRow = $traineeCheckStmt->fetch(PDO::FETCH_ASSOC);
 
-    if (!$traineeCheckStmt->fetch(PDO::FETCH_ASSOC)) {
+    if (!$traineeRow) {
         json_response(['error' => 'Trainee not found', 'message' => 'No trainee exists with the requested ID.'], 404);
     }
 
+    $traineeUserId = $traineeRow['user_id'] ?? $traineeId;
+
+    // Fetch records by matching either trainees.id or trainees.user_id
     $stmt = $db->prepare("
         SELECT
             tr.id,
@@ -105,10 +110,14 @@ try {
             c.is_active
         FROM public.training_records tr
         LEFT JOIN public.courses c ON c.id = tr.course_id
-        WHERE tr.trainee_id = :trainee_id
+        WHERE tr.trainee_id = :trainee_id 
+           OR tr.trainee_id = :trainee_user_id
         ORDER BY tr.attendance_date DESC, tr.created_at DESC
     ");
-    $stmt->execute([':trainee_id' => $traineeId]);
+    $stmt->execute([
+        ':trainee_id' => $traineeId,
+        ':trainee_user_id' => $traineeUserId
+    ]);
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
     $records = [];
