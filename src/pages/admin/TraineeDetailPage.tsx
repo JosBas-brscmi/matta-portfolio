@@ -219,7 +219,7 @@ const computedProgress = useMemo(() => {
 
   const handleDownload = async (file: PortfolioFile) => {
     setDownloadingId(file.id)
-    const { url, error } = await getFileDownloadUrl(file.storage_path)
+    const { url, error } = await getFileDownloadUrl(file.id)
     setDownloadingId(null)
     if (error || !url) {
       alert(`Could not open file: ${error?.message ?? 'unknown error'}`)
