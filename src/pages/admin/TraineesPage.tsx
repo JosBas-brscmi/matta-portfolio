@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import Icon from '../../components/Icon'
 import { listTrainees, type TraineeWithProfile } from '../../services/traineeService'
@@ -21,6 +21,11 @@ export default function TraineesPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [recentlyInvited, setRecentlyInvited] = useState<string | null>(null)
 
+  const [searchQuery, setSearchQuery] = useState('')
+  const [batchFilter, setBatchFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [departmentFilter, setDepartmentFilter] = useState('')
+
   const refresh = useCallback(async () => {
     setLoading(true)
     const { trainees: data, error } = await listTrainees()
@@ -41,6 +46,39 @@ export default function TraineesPage() {
     setRecentlyInvited(new Date().toISOString())
     refresh()
   }
+
+  // Derive filter dropdown options from the trainees we actually have.
+  const batchOptions = useMemo(
+    () => Array.from(new Set(trainees.map((t) => t.batch_code).filter(Boolean))).sort(),
+    [trainees],
+  )
+  const departmentOptions = useMemo(
+    () => Array.from(new Set(trainees.map((t) => t.department).filter((d): d is string => !!d))).sort(),
+    [trainees],
+  )
+
+  const filteredTrainees = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+
+    return trainees.filter((t) => {
+      if (batchFilter && t.batch_code !== batchFilter) return false
+      if (statusFilter && t.training_status !== statusFilter) return false
+      if (departmentFilter && t.department !== departmentFilter) return false
+
+      if (q) {
+        const haystack = [
+          t.users_profile?.full_name ?? '',
+          t.users_profile?.email ?? '',
+          t.employee_id ?? '',
+        ]
+          .join(' ')
+          .toLowerCase()
+        if (!haystack.includes(q)) return false
+      }
+
+      return true
+    })
+  }, [trainees, searchQuery, batchFilter, statusFilter, departmentFilter])
 
   return (
     <div className="dashboard-content">
@@ -82,17 +120,33 @@ export default function TraineesPage() {
           <input
             type="search"
             placeholder="Search by name, email, or employee ID…"
-            disabled
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
           />
         </div>
-        <select disabled defaultValue="">
+        <select value={batchFilter} onChange={(e) => setBatchFilter(e.target.value)}>
           <option value="">All batches</option>
+          {batchOptions.map((b) => (
+            <option key={b} value={b}>
+              {b}
+            </option>
+          ))}
         </select>
-        <select disabled defaultValue="">
+        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
           <option value="">All statuses</option>
+          {Object.entries(STATUS_LABELS).map(([value, meta]) => (
+            <option key={value} value={value}>
+              {meta.label}
+            </option>
+          ))}
         </select>
-        <select disabled defaultValue="">
+        <select value={departmentFilter} onChange={(e) => setDepartmentFilter(e.target.value)}>
           <option value="">All departments</option>
+          {departmentOptions.map((d) => (
+            <option key={d} value={d}>
+              {d}
+            </option>
+          ))}
         </select>
       </div>
 
@@ -116,6 +170,16 @@ export default function TraineesPage() {
             </button>
           </div>
         </div>
+      ) : filteredTrainees.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-state-icon">
+            <Icon name="search" size={28} />
+          </div>
+          <h2 className="empty-state-title">No matches</h2>
+          <p className="empty-state-desc">
+            No trainees match your current search or filters. Try adjusting them.
+          </p>
+        </div>
       ) : (
         <div className="data-table-wrap">
           <table className="data-table">
@@ -130,7 +194,7 @@ export default function TraineesPage() {
               </tr>
             </thead>
             <tbody>
-              {trainees.map((t) => {
+              {filteredTrainees.map((t) => {
                 const status = STATUS_LABELS[t.training_status] ?? {
                   label: t.training_status,
                   cls: 'status-onboarding',
