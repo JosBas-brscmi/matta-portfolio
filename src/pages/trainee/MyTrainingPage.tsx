@@ -19,6 +19,7 @@ const PHASE_LABEL: Record<string, string> = {
 function formatDate(iso: string): string {
   try {
     return new Date(iso).toLocaleDateString('en-US', {
+      timeZone: 'Asia/Singapore',
       year: 'numeric',
       month: 'short',
       day: 'numeric',
