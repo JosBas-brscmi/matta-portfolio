@@ -2,15 +2,10 @@
 // update_assessment.php
 
 header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: PUT, POST, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
 
-// Handle CORS preflight request
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit();
-}
+require_once __DIR__ . '/config.php';
+
+session_start();
 
 // Ensure request method is POST or PUT
 if (!in_array($_SERVER['REQUEST_METHOD'], ['POST', 'PUT'])) {
@@ -22,24 +17,48 @@ if (!in_array($_SERVER['REQUEST_METHOD'], ['POST', 'PUT'])) {
     exit();
 }
 
-// Database Credentials for PostgreSQL
-$db_host = 'localhost';
-$db_port = '5432'; // Default PostgreSQL port
-$db_name = 'matta_db';
-$db_user = 'db_username';
-$db_pass = 'db_password';
+$userId = $_SESSION['user_id'] ?? null;
+
+if (!$userId) {
+    http_response_code(401);
+    echo json_encode([
+        'status' => 'error',
+        'message' => 'Not signed in.'
+    ]);
+    exit();
+}
 
 try {
-    $dsn = "pgsql:host={$db_host};port={$db_port};dbname={$db_name}";
-    $pdo = new PDO($dsn, $db_user, $db_pass, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-    ]);
+    $pdo = get_db();
 } catch (PDOException $e) {
     http_response_code(500);
     echo json_encode([
         'status' => 'error',
         'message' => 'Database connection failed: ' . $e->getMessage()
+    ]);
+    exit();
+}
+
+// Confirm caller is authorized to edit assessments (mirrors role checks used elsewhere in the API).
+$callerStmt = $pdo->prepare("SELECT role FROM public.users_profile WHERE id = :id LIMIT 1");
+$callerStmt->execute([':id' => $userId]);
+$caller = $callerStmt->fetch();
+
+if (!$caller) {
+    http_response_code(403);
+    echo json_encode([
+        'status' => 'error',
+        'message' => 'User profile not found.'
+    ]);
+    exit();
+}
+
+$authorizedRoles = ['owner', 'ma_center', 'admin', 'administrator', 'staff', 'trainer', 'manager', 'supervisor', 'mentor'];
+if (!in_array(strtolower(trim((string) $caller['role'])), $authorizedRoles, true)) {
+    http_response_code(403);
+    echo json_encode([
+        'status' => 'error',
+        'message' => 'You are not authorized to edit assessments.'
     ]);
     exit();
 }
