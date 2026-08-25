@@ -90,7 +90,7 @@ $assessment_type = isset($data['assessment_type']) ? trim($data['assessment_type
 $assessment_date = isset($data['assessment_date']) ? trim($data['assessment_date']) : null;
 $score = isset($data['score']) && $data['score'] !== '' ? filter_var($data['score'], FILTER_VALIDATE_FLOAT) : null;
 $max_score = isset($data['max_score']) && $data['max_score'] !== '' ? filter_var($data['max_score'], FILTER_VALIDATE_FLOAT) : null;
-$remarks = isset($data['remarks']) ? trim($data['remarks']) : null;
+$comments = isset($data['comments']) ? trim($data['comments']) : null;
 
 try {
     // Check if assessment record exists
@@ -115,7 +115,7 @@ try {
                 assessment_date = COALESCE(:assessment_date, assessment_date),
                 score = COALESCE(:score, score),
                 max_score = COALESCE(:max_score, max_score),
-                remarks = COALESCE(:remarks, remarks),
+                comments = COALESCE(:comments, comments),
                 updated_at = NOW()
             WHERE id = :id";
 
@@ -126,7 +126,7 @@ try {
         ':assessment_date' => $assessment_date,
         ':score' => $score !== false ? $score : null,
         ':max_score' => $max_score !== false ? $max_score : null,
-        ':remarks' => $remarks,
+        ':comments' => $comments,
         ':id' => $assessment_id,
     ]);
 
