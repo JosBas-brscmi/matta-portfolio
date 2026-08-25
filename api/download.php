@@ -137,62 +137,25 @@ try {
     }
 
     /*
-     * The database stores the storage_path.
-     *
-     * Example:
-     *
-     *   /storage/uploads/file.pdf
-     *
-     * or:
-     *
-     *   storage/uploads/file.pdf
-     *
-     * Convert it to a safe filesystem-relative path.
+     * The database stores the storage_path relative to /api/uploads/,
+     * e.g. "portfolio/6a8cf898f023d_1787623576.png"
+     * (see upload_portfolio_file.php, which saves under __DIR__ . '/uploads/').
      */
     $storagePath = str_replace('\\', '/', $file['storage_path']);
     $storagePath = ltrim($storagePath, '/');
 
-    /*
-     * Only allow paths inside storage/uploads.
-     * This prevents ../ path traversal.
-     */
-    if (
-        !str_starts_with(
-            $storagePath,
-            'storage/uploads/'
-        )
-    ) {
-        /*
-         * Current upload.php may store older paths that are
-         * not directly rooted at storage/uploads.
-         *
-         * Try the basename as a backwards-compatible fallback.
-         */
-        $basename = basename($storagePath);
-
-        if (
-            $basename === '' ||
-            $basename === '.' ||
-            $basename === '..'
-        ) {
-            fail_response('Invalid storage path', 400);
-        }
-
-        $storagePath = 'storage/uploads/' . $basename;
+    if ($storagePath === '' || $storagePath === '.' || $storagePath === '..') {
+        fail_response('Invalid storage path', 400);
     }
 
-    $filePath = dirname(__DIR__) . '/' . $storagePath;
+    $uploadsRoot = realpath(__DIR__ . '/uploads');
+    $filePath = __DIR__ . '/uploads/' . $storagePath;
+    $realFilePath = realpath($filePath);
 
     /*
      * Make absolutely sure the resolved path is still inside
-     * the project's storage/uploads directory.
+     * the /api/uploads/ directory. This prevents ../ path traversal.
      */
-    $uploadsRoot = realpath(
-        dirname(__DIR__) . '/storage/uploads'
-    );
-
-    $realFilePath = realpath($filePath);
-
     if (
         $uploadsRoot === false ||
         $realFilePath === false ||
