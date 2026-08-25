@@ -652,60 +652,41 @@ export async function getTraineeTrainingProgress(
   traineeId: string,
 ): Promise<{
   progress: TrainingProgress
-  error: {
-    message: string
-  } | null
+  error: { message: string } | null
 }> {
-  const {
-    records,
-    error,
-  } =
-    await listTraineeTrainingRecords(
-      traineeId,
-    )
+  const { records, error } = await listTraineeTrainingRecords(traineeId)
 
   const progress: TrainingProgress = {
     phase1_hours: 0,
-    phase1_target:
-      PHASE1_TARGET_HOURS,
+    phase1_target: PHASE1_TARGET_HOURS,
     phase2_hours: 0,
-    phase2_target:
-      PHASE2_TARGET_HOURS,
+    phase2_target: PHASE2_TARGET_HOURS,
   }
 
-  if (error) {
-    return {
-      progress,
-      error,
-    }
+  if (error || !records) {
+    return { progress, error }
   }
 
   for (const record of records) {
-    if (!record.attended) {
-      continue
-    }
+    const attended = String(record.attended) === '1' || String(record.attended).toLowerCase() === 'true' || record.attended === true
+    if (!attended) continue
 
-    const phase =
-      record.course?.phase
+    const phase = String(
+      record.course?.phase ||
+      (record as unknown as { course_phase?: string }).course_phase ||
+      (record as unknown as { phase?: string }).phase ||
+      ''
+    ).toLowerCase()
 
-    if (
-      phase ===
-      'phase1_general'
-    ) {
-      progress.phase1_hours +=
-        Number(record.hours) || 0
-    } else if (
-      phase ===
-      'phase2_department'
-    ) {
-      progress.phase2_hours +=
-        Number(record.hours) || 0
+    const hours = Number(record.hours) || 0
+
+    if (phase.includes('phase1') || phase === 'phase1_general') {
+      progress.phase1_hours += hours
+    } else if (phase.includes('phase2') || phase === 'phase2_department') {
+      progress.phase2_hours += hours
     }
   }
 
-  return {
-    progress,
-    error: null,
-  }
+  return { progress, error: null }
 }
 
