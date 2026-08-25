@@ -81,31 +81,36 @@ export default function TraineeDetailPage() {
   const [editingReview, setEditingReview] = useState<Review | null>(null)
   const [savingStatus, setSavingStatus] = useState(false)
 
-  // Calculate total hours and phase progress from training records
+// Calculate total hours and phase progress from training records
   const computedProgress = useMemo(() => {
     let total = 0
     let p1 = 0
     let p2 = 0
 
     for (const r of trainingRecords) {
-      // Safely check record hours or fallback to course hours
-      const courseHours = (r.course as unknown as { hours?: number })?.hours
-      const hours = Number(r.hours) || Number(courseHours) || 0
+      // Skip record if attendance is explicitly false
+      if (r.attended === false) continue
+
+      // PHP backend provides computed hours directly in r.hours
+      const hours = Number(r.hours ?? 0)
+      if (isNaN(hours) || hours <= 0) continue
+
       total += hours
 
-      const rawPhase =
-        r.course?.phase ||
-        (r as unknown as { course_phase?: string }).course_phase ||
-        (r as unknown as { phase?: string }).phase ||
-        ''
+      // Extract phase string from nested course object
+      const phaseStr = String(r.course?.phase ?? '').toLowerCase().trim()
 
-      const phase = String(rawPhase).toLowerCase()
-
-      if (phase.includes('phase1') || phase.includes('general') || phase.includes('p1')) {
-        p1 += hours
-      } else if (phase.includes('phase2') || phase.includes('department') || phase.includes('dept') || phase.includes('p2')) {
+      if (
+        phaseStr.includes('phase2') ||
+        phaseStr.includes('phase_2') ||
+        phaseStr.includes('department') ||
+        phaseStr.includes('dept') ||
+        phaseStr.includes('p2') ||
+        phaseStr === '2'
+      ) {
         p2 += hours
       } else {
+        // Default to Phase 1 (phase1, general, p1, or unassigned)
         p1 += hours
       }
     }
