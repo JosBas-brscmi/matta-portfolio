@@ -81,48 +81,22 @@ export default function TraineeDetailPage() {
   const [editingReview, setEditingReview] = useState<Review | null>(null)
   const [savingStatus, setSavingStatus] = useState(false)
 
-// Calculate total hours and phase progress from training records
-  const computedProgress = useMemo(() => {
-    let total = 0
-    let p1 = 0
-    let p2 = 0
+// Use backend-computed progress directly, same source of truth as the trainee-facing page.
+const computedProgress = useMemo(() => {
+  const total = trainingRecords.reduce((sum, r) => {
+    if (r.attended === false) return sum
+    const hours = Number(r.hours ?? 0)
+    return isNaN(hours) ? sum : sum + hours
+  }, 0)
 
-    for (const r of trainingRecords) {
-      // Skip record if attendance is explicitly false
-      if (r.attended === false) continue
-
-      // PHP backend provides computed hours directly in r.hours
-      const hours = Number(r.hours ?? 0)
-      if (isNaN(hours) || hours <= 0) continue
-
-      total += hours
-
-      // Extract phase string from nested course object
-      const phaseStr = String(r.course?.phase ?? '').toLowerCase().trim()
-
-      if (
-        phaseStr.includes('phase2') ||
-        phaseStr.includes('phase_2') ||
-        phaseStr.includes('department') ||
-        phaseStr.includes('dept') ||
-        phaseStr.includes('p2') ||
-        phaseStr === '2'
-      ) {
-        p2 += hours
-      } else {
-        // Default to Phase 1 (phase1, general, p1, or unassigned)
-        p1 += hours
-      }
-    }
-
-    return {
-      total_hours: total,
-      phase1_hours: p1,
-      phase1_target: trainingProgress?.phase1_target ?? 100,
-      phase2_hours: p2,
-      phase2_target: trainingProgress?.phase2_target ?? 100,
-    }
-  }, [trainingRecords, trainingProgress])
+  return {
+    total_hours: total,
+    phase1_hours: trainingProgress?.phase1_hours ?? 0,
+    phase1_target: trainingProgress?.phase1_target ?? 100,
+    phase2_hours: trainingProgress?.phase2_hours ?? 0,
+    phase2_target: trainingProgress?.phase2_target ?? 100,
+  }
+}, [trainingRecords, trainingProgress])
 
   const handleStatusChange = async (newStatus: string) => {
     if (!trainee) return
