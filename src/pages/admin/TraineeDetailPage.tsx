@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import Icon from '../../components/Icon'
 import {
@@ -80,6 +80,44 @@ export default function TraineeDetailPage() {
   const [reviewModalOpen, setReviewModalOpen] = useState(false)
   const [editingReview, setEditingReview] = useState<Review | null>(null)
   const [savingStatus, setSavingStatus] = useState(false)
+
+  // Compute total hours dynamically from state
+  const computedProgress: TrainingProgress = useMemo(() => {
+    let p1 = 0
+    let p2 = 0
+
+    for (const r of trainingRecords) {
+      const attended =
+        r.attended === true ||
+        String(r.attended) === '1' ||
+        String(r.attended).toLowerCase() === 'true'
+
+      if (!attended) continue
+
+      const hours = Number(r.hours) || 0
+
+      const rawPhase =
+        r.course?.phase ||
+        (r as unknown as { course_phase?: string }).course_phase ||
+        (r as unknown as { phase?: string }).phase ||
+        ''
+
+      const phase = String(rawPhase).toLowerCase()
+
+      if (phase === 'phase1_general' || phase.includes('phase1')) {
+        p1 += hours
+      } else if (phase === 'phase2_department' || phase.includes('phase2')) {
+        p2 += hours
+      }
+    }
+
+    return {
+      phase1_hours: p1,
+      phase1_target: trainingProgress?.phase1_target ?? 100,
+      phase2_hours: p2,
+      phase2_target: trainingProgress?.phase2_target ?? 100,
+    }
+  }, [trainingRecords, trainingProgress])
 
   const handleStatusChange = async (newStatus: string) => {
     if (!trainee) return
@@ -370,33 +408,33 @@ export default function TraineeDetailPage() {
             <h2>Training records 訓練紀錄</h2>
             <span className="card-tag">{trainingRecords.length} entries</span>
           </div>
-          {trainingProgress && (
+          {computedProgress && (
             <div className="training-mini-progress">
               <div className="mini-progress-row">
                 <span className="mini-progress-label">Phase 1</span>
                 <span className="mini-progress-value">
-                  {trainingProgress.phase1_hours.toFixed(1)} / {trainingProgress.phase1_target} hrs
+                  {computedProgress.phase1_hours.toFixed(1)} / {computedProgress.phase1_target} hrs
                 </span>
               </div>
               <div className="progress-bar mini">
                 <div
                   className="progress-fill"
                   style={{
-                    width: `${Math.min(100, (trainingProgress.phase1_hours / trainingProgress.phase1_target) * 100)}%`,
+                    width: `${Math.min(100, (computedProgress.phase1_hours / computedProgress.phase1_target) * 100)}%`,
                   }}
                 />
               </div>
               <div className="mini-progress-row">
                 <span className="mini-progress-label">Phase 2</span>
                 <span className="mini-progress-value">
-                  {trainingProgress.phase2_hours.toFixed(1)} / {trainingProgress.phase2_target} hrs
+                  {computedProgress.phase2_hours.toFixed(1)} / {computedProgress.phase2_target} hrs
                 </span>
               </div>
               <div className="progress-bar mini">
                 <div
                   className="progress-fill accent"
                   style={{
-                    width: `${Math.min(100, (trainingProgress.phase2_hours / trainingProgress.phase2_target) * 100)}%`,
+                    width: `${Math.min(100, (computedProgress.phase2_hours / computedProgress.phase2_target) * 100)}%`,
                   }}
                 />
               </div>
