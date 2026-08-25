@@ -81,19 +81,16 @@ export default function TraineeDetailPage() {
   const [editingReview, setEditingReview] = useState<Review | null>(null)
   const [savingStatus, setSavingStatus] = useState(false)
 
-  // Dynamically compute total hours and phase progress directly from training records
+  // Calculate total hours and phase progress from training records
   const computedProgress = useMemo(() => {
     let total = 0
     let p1 = 0
     let p2 = 0
 
     for (const r of trainingRecords) {
-      // Include record unless explicitly marked false/unattended
-      if (r.attended === false || String(r.attended) === '0' || String(r.attended).toLowerCase() === 'false') {
-        continue
-      }
-
-      const hours = Number(r.hours) || 0
+      // Safely check record hours or fallback to course hours
+      const courseHours = (r.course as unknown as { hours?: number })?.hours
+      const hours = Number(r.hours) || Number(courseHours) || 0
       total += hours
 
       const rawPhase =
@@ -109,7 +106,6 @@ export default function TraineeDetailPage() {
       } else if (phase.includes('phase2') || phase.includes('department') || phase.includes('dept') || phase.includes('p2')) {
         p2 += hours
       } else {
-        // Fallback: If unclassified phase, default to Phase 1 or 2 based on training progress fallback
         p1 += hours
       }
     }
@@ -457,16 +453,20 @@ export default function TraineeDetailPage() {
             </p>
           ) : (
             <div className="training-records-mini" style={SCROLLABLE_CONTAINER_STYLE}>
-              {trainingRecords.map((r) => (
-                <div key={r.id} className="training-record-mini">
-                  <span className="training-record-mini-date">
-                    {new Date(r.attendance_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                  </span>
-                  <span className="training-record-mini-title">{r.course?.course_name ?? 'Unnamed'}</span>
-                  <span className="training-record-mini-hours">{Number(r.hours).toFixed(1)}h</span>
-                  {r.test_score != null && <span className="training-record-mini-score">{r.test_score}</span>}
-                </div>
-              ))}
+              {trainingRecords.map((r) => {
+                const courseHours = (r.course as unknown as { hours?: number })?.hours
+                const rowHours = Number(r.hours) || Number(courseHours) || 0
+                return (
+                  <div key={r.id} className="training-record-mini">
+                    <span className="training-record-mini-date">
+                      {new Date(r.attendance_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    </span>
+                    <span className="training-record-mini-title">{r.course?.course_name ?? 'Unnamed'}</span>
+                    <span className="training-record-mini-hours">{rowHours.toFixed(1)}h</span>
+                    {r.test_score != null && <span className="training-record-mini-score">{r.test_score}</span>}
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
