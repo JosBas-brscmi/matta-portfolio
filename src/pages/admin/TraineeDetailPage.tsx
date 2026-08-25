@@ -81,20 +81,20 @@ export default function TraineeDetailPage() {
   const [editingReview, setEditingReview] = useState<Review | null>(null)
   const [savingStatus, setSavingStatus] = useState(false)
 
-  // Compute total hours dynamically from state
-  const computedProgress: TrainingProgress = useMemo(() => {
+  // Dynamically compute total hours and phase progress directly from training records
+  const computedProgress = useMemo(() => {
+    let total = 0
     let p1 = 0
     let p2 = 0
 
     for (const r of trainingRecords) {
-      const attended =
-        r.attended === true ||
-        String(r.attended) === '1' ||
-        String(r.attended).toLowerCase() === 'true'
-
-      if (!attended) continue
+      // Include record unless explicitly marked false/unattended
+      if (r.attended === false || String(r.attended) === '0' || String(r.attended).toLowerCase() === 'false') {
+        continue
+      }
 
       const hours = Number(r.hours) || 0
+      total += hours
 
       const rawPhase =
         r.course?.phase ||
@@ -104,14 +104,18 @@ export default function TraineeDetailPage() {
 
       const phase = String(rawPhase).toLowerCase()
 
-      if (phase === 'phase1_general' || phase.includes('phase1')) {
+      if (phase.includes('phase1') || phase.includes('general') || phase.includes('p1')) {
         p1 += hours
-      } else if (phase === 'phase2_department' || phase.includes('phase2')) {
+      } else if (phase.includes('phase2') || phase.includes('department') || phase.includes('dept') || phase.includes('p2')) {
         p2 += hours
+      } else {
+        // Fallback: If unclassified phase, default to Phase 1 or 2 based on training progress fallback
+        p1 += hours
       }
     }
 
     return {
+      total_hours: total,
       phase1_hours: p1,
       phase1_target: trainingProgress?.phase1_target ?? 100,
       phase2_hours: p2,
@@ -406,40 +410,47 @@ export default function TraineeDetailPage() {
         <div className="dashboard-card training-records-card">
           <div className="dashboard-card-header">
             <h2>Training records 訓練紀錄</h2>
-            <span className="card-tag">{trainingRecords.length} entries</span>
-          </div>
-          {computedProgress && (
-            <div className="training-mini-progress">
-              <div className="mini-progress-row">
-                <span className="mini-progress-label">Phase 1</span>
-                <span className="mini-progress-value">
-                  {computedProgress.phase1_hours.toFixed(1)} / {computedProgress.phase1_target} hrs
-                </span>
-              </div>
-              <div className="progress-bar mini">
-                <div
-                  className="progress-fill"
-                  style={{
-                    width: `${Math.min(100, (computedProgress.phase1_hours / computedProgress.phase1_target) * 100)}%`,
-                  }}
-                />
-              </div>
-              <div className="mini-progress-row">
-                <span className="mini-progress-label">Phase 2</span>
-                <span className="mini-progress-value">
-                  {computedProgress.phase2_hours.toFixed(1)} / {computedProgress.phase2_target} hrs
-                </span>
-              </div>
-              <div className="progress-bar mini">
-                <div
-                  className="progress-fill accent"
-                  style={{
-                    width: `${Math.min(100, (computedProgress.phase2_hours / computedProgress.phase2_target) * 100)}%`,
-                  }}
-                />
-              </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <span className="card-tag">{computedProgress.total_hours.toFixed(1)} Total Hrs</span>
+              <span className="card-tag">{trainingRecords.length} entries</span>
             </div>
-          )}
+          </div>
+          <div className="training-mini-progress">
+            <div className="mini-progress-row">
+              <span className="mini-progress-label">Total Hours 總時數</span>
+              <span className="mini-progress-value" style={{ fontWeight: 600 }}>
+                {computedProgress.total_hours.toFixed(1)} hrs
+              </span>
+            </div>
+            <div className="mini-progress-row">
+              <span className="mini-progress-label">Phase 1</span>
+              <span className="mini-progress-value">
+                {computedProgress.phase1_hours.toFixed(1)} / {computedProgress.phase1_target} hrs
+              </span>
+            </div>
+            <div className="progress-bar mini">
+              <div
+                className="progress-fill"
+                style={{
+                  width: `${Math.min(100, (computedProgress.phase1_hours / computedProgress.phase1_target) * 100)}%`,
+                }}
+              />
+            </div>
+            <div className="mini-progress-row">
+              <span className="mini-progress-label">Phase 2</span>
+              <span className="mini-progress-value">
+                {computedProgress.phase2_hours.toFixed(1)} / {computedProgress.phase2_target} hrs
+              </span>
+            </div>
+            <div className="progress-bar mini">
+              <div
+                className="progress-fill accent"
+                style={{
+                  width: `${Math.min(100, (computedProgress.phase2_hours / computedProgress.phase2_target) * 100)}%`,
+                }}
+              />
+            </div>
+          </div>
           {trainingRecords.length === 0 ? (
             <p className="dashboard-card-body muted">
               No training records yet. Records will appear here once the trainee starts logging their learning journey.
