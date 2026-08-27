@@ -1942,20 +1942,59 @@ button {
    Landing page redesign (with sign-up CTA)
    ============================================================ */
 .landing-shell {
+  position: relative;
   min-height: 100vh;
   background: linear-gradient(180deg, #FAFAF5 0%, #F0F4FA 100%);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
-.landing-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 1.5rem 2.5rem;
-  max-width: 1200px;
-  width: 100%;
-  margin: 0 auto;
+/* Side panels — fill the space beyond the 1200px centered content column
+   on wide screens. Customize by overriding these two variables:
+     --landing-side-bg    → solid color / gradient fallback
+     --landing-side-image → background-image (gradient or url(...) for a photo)
+   Example — solid color:
+     .landing-shell { --landing-side-image: none; --landing-side-bg: #0F0F0F; }
+   Example — photo:
+     .landing-shell { --landing-side-image: url('/landing-side.jpg'); }
+*/
+.landing-shell::before,
+.landing-shell::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: max(0px, calc((100% - 1200px) / 2));
+  background-color: var(--landing-side-bg, transparent);
+  background-image: var(--landing-side-image, linear-gradient(160deg, #E8F0FB 0%, #E7F4ED 100%));
+  background-size: cover;
+  background-position: center;
+  z-index: 0;
+}
+
+.landing-shell::before {
+  left: 0;
+  box-shadow: inset -1px 0 0 var(--color-border);
+}
+
+.landing-shell::after {
+  right: 0;
+  box-shadow: inset 1px 0 0 var(--color-border);
+}
+
+.landing-header,
+.landing-hero,
+.landing-footer {
+  position: relative;
+  z-index: 1;
+}
+
+@media (max-width: 1300px) {
+  .landing-shell::before,
+  .landing-shell::after {
+    display: none;
+  }
 }
 
 .landing-nav {

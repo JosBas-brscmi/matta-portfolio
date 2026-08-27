@@ -397,6 +397,7 @@ export async function createOwnTraineeRow(
       employee_id: payload.employee_id.trim(),
       batch_code: payload.batch_code.trim(),
       education: payload.education?.trim() || null,
+      onboard_date: new Date().toISOString().slice(0, 10), // YYYY-MM-DD
     }
 
     if (payload.user_id) {
