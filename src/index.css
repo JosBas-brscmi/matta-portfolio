@@ -4217,7 +4217,7 @@ button {
 .announce-panel {
   position: fixed;
   bottom: 1.5rem;
-  left: 20rem;
+  left: 17rem;
   z-index: 20;
   width: min(320px, calc(100vw - 2rem));
   max-height: calc(100vh - 3rem);
