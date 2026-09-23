@@ -4493,10 +4493,10 @@ button {
   margin: 0;
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 960px) {
   .announce-panel {
     bottom: 1rem;
-    left: 15.25rem;
+    left: 15rem;
     width: min(320px, calc(100vw - 18.25rem));
     max-height: calc(100vh - 2rem);
   }
