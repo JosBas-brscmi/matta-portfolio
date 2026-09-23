@@ -4213,14 +4213,66 @@ button {
    Step 18 · Announcements
    ============================================================ */
 
-/* ---- Right-side persistent panel ---- */
+/* ---- Floating announcement panel ---- */
 .announce-panel {
-  width: 300px;
-  flex-shrink: 0;
-  align-self: stretch;
+  position: fixed;
+  top: 76px;
+  right: 1.5rem;
+  z-index: 20;
+  width: min(320px, calc(100vw - 2rem));
+  max-height: calc(100vh - 92px);
+  overflow-y: auto;
   background-color: var(--color-surface);
-  border-left: 1px solid var(--color-border);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
   padding: 1.5rem 1.25rem;
+  box-shadow: var(--shadow-lg);
+}
+
+.announce-panel-minimized {
+  width: auto;
+  max-height: none;
+  padding: 0.35rem;
+  overflow: visible;
+}
+
+.announce-panel-restore {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.25rem;
+  padding: 0.35rem 0.65rem;
+  color: var(--color-text);
+  font-size: 0.82rem;
+  font-weight: 700;
+  border-radius: var(--radius-md);
+}
+
+.announce-panel-restore:hover {
+  background-color: var(--color-surface-muted);
+}
+
+.announce-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.announce-panel-minimize {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  color: var(--color-text-secondary);
+  font-size: 1.2rem;
+  line-height: 1;
+  border-radius: var(--radius-sm);
+}
+
+.announce-panel-minimize:hover {
+  background-color: var(--color-surface-muted);
+  color: var(--color-text);
 }
 
 .announce-panel-head {
@@ -4443,7 +4495,21 @@ button {
 
 @media (max-width: 1100px) {
   .announce-panel {
-    display: none; /* keep phones/tablets focused on main content */
+    top: 68px;
+    right: 1rem;
+    max-height: calc(100vh - 84px);
+  }
+}
+
+@media (max-width: 600px) {
+  .announce-panel {
+    top: 68px;
+    right: 0.75rem;
+    width: min(320px, calc(100vw - 1.5rem));
+  }
+
+  .announce-panel-minimized {
+    width: auto;
   }
 }
 

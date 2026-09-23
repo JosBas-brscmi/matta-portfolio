@@ -49,6 +49,7 @@ export default function AnnouncementsPanel() {
   const [open, setOpen] = useState<Announcement | null>(null);
   const [viewFiles, setViewFiles] = useState<ViewFile[]>([]);
   const [lastSeen, setLastSeen] = useState<number>(getLastSeen());
+  const [minimized, setMinimized] = useState(false);
 
   useEffect(() => {
     listMyAnnouncements().then((result: Awaited<ReturnType<typeof listMyAnnouncements>>) => {
@@ -93,13 +94,43 @@ export default function AnnouncementsPanel() {
 
   const blockDownload = (e: React.MouseEvent) => e.preventDefault();
 
+  if (minimized) {
+    return (
+      <aside className="announce-panel announce-panel-minimized">
+        <button
+          type="button"
+          className="announce-panel-restore"
+          onClick={() => setMinimized(false)}
+          aria-label="Show announcements"
+        >
+          <span aria-hidden="true">📢</span>
+          <span>Announcements</span>
+          {unreadCount > 0 && (
+            <span className="announce-unread-badge">{unreadCount}</span>
+          )}
+        </button>
+      </aside>
+    );
+  }
+
   return (
     <aside className="announce-panel">
       <div className="announce-panel-head">
         <span className="announce-panel-title">📢 Latest 最新公告</span>
-        {unreadCount > 0 && (
-          <span className="announce-unread-badge">{unreadCount} new 未讀</span>
-        )}
+        <div className="announce-panel-actions">
+          {unreadCount > 0 && (
+            <span className="announce-unread-badge">{unreadCount} new 未讀</span>
+          )}
+          <button
+            type="button"
+            className="announce-panel-minimize"
+            onClick={() => setMinimized(true)}
+            aria-label="Minimize announcements"
+            title="Minimize announcements"
+          >
+            −
+          </button>
+        </div>
       </div>
 
       {loading ? (
