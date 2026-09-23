@@ -28,35 +28,3 @@ CREATE TABLE IF NOT EXISTS public.announcement_files (
         REFERENCES public.announcements(id)
         ON DELETE CASCADE
 );
-
--- Optional sample insert for testing
-INSERT INTO public.announcements (id, author_id, title, body, is_global, created_at)
-VALUES (
-    '11111111-1111-4111-8111-111111111111',
-    '22222222-2222-4222-8222-222222222222',
-    'Test Announcement',
-    'This is a test announcement body.',
-    true,
-    NOW()
-)
-ON CONFLICT (id) DO NOTHING;
-
-INSERT INTO public.announcement_files (
-    id,
-    announcement_id,
-    file_name,
-    file_type,
-    file_size_bytes,
-    storage_path,
-    uploaded_at
-)
-VALUES (
-    '33333333-3333-4333-8333-333333333333',
-    '11111111-1111-4111-8111-111111111111',
-    'sample.pdf',
-    'application/pdf',
-    24567,
-    'announcements/sample.pdf',
-    NOW()
-)
-ON CONFLICT (id) DO NOTHING;
