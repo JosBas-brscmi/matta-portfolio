@@ -20,11 +20,13 @@ import CoursesPage from './pages/admin/CoursesPage'
 import ReviewsPage from './pages/admin/ReviewsPage'
 import SettingsPage from './pages/admin/SettingsPage'
 import UsersPage from './pages/admin/UsersPage'
+import AnnouncementsPage from './pages/admin/AnnouncementsPage'
 
 import MyTrainingPage from './pages/trainee/MyTrainingPage'
 import MyPortfolioPage from './pages/trainee/MyPortfolioPage'
 import MyAssessmentsPage from './pages/trainee/MyAssessmentsPage'
 import MyProfilePage from './pages/trainee/MyProfilePage'
+import MyResourcesPage from './pages/trainee/MyResourcesPage'
 
 import ReportPage from './pages/ReportPage'
 import AccountPage from './pages/AccountPage'
@@ -283,6 +285,15 @@ function AppRoutes() {
           }
         />
 
+        <Route
+          path="/admin/announcements"
+          element={
+            <AdminRoute>
+              <AnnouncementsPage />
+            </AdminRoute>
+          }
+        />
+
         {/* -------------------------------------------------------
             TRAINEE UI
             ------------------------------------------------------- */}
@@ -319,6 +330,15 @@ function AppRoutes() {
           element={
             <TraineeRoute>
               <MyProfilePage />
+            </TraineeRoute>
+          }
+        />
+
+        <Route
+          path="/my-resources"
+          element={
+            <TraineeRoute>
+              <MyResourcesPage />
             </TraineeRoute>
           }
         />

@@ -1,4 +1,3 @@
-//test comment for git push and pull
 import { useEffect, useState, useCallback } from 'react'
 import Icon from '../../components/Icon'
 import { useRef, type ChangeEvent } from 'react'
