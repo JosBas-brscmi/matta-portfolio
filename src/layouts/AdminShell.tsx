@@ -1,7 +1,6 @@
 import { NavLink, Outlet, Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import Icon from '../components/Icon'
-import AnnouncementsPanel from '../components/AnnouncementsPanel'
 
 export default function AdminShell() {
   const { profile, user, signOut } = useAuth()
@@ -36,9 +35,6 @@ export default function AdminShell() {
               </NavLink>
               <NavLink to="/my-portfolio" className="admin-nav-item">
                 <Icon name="folder" /> My Portfolio
-              </NavLink>
-              <NavLink to="/my-resources" className="admin-nav-item">
-                <Icon name="book" /> Resources 資源
               </NavLink>
               <NavLink to="/my-assessments" className="admin-nav-item">
                 <Icon name="check" /> Assessments
@@ -75,9 +71,6 @@ export default function AdminShell() {
               <NavLink to="/admin/users" className="admin-nav-item">
                 <Icon name="users" /> Users 使用者
               </NavLink>
-              <NavLink to="/admin/announcements" className="admin-nav-item">
-                <Icon name="book" /> Announcements 公告
-              </NavLink>
               {isOwner && (
                 <NavLink to="/admin/settings" className="admin-nav-item">
                   <Icon name="settings" /> Settings 設定
@@ -109,12 +102,9 @@ export default function AdminShell() {
           </div>
         </header>
 
-        <div className="admin-content-wrap">
-          <main className="admin-content">
-            <Outlet />
-          </main>
-          <AnnouncementsPanel />
-        </div>
+        <main className="admin-content">
+          <Outlet />
+        </main>
       </div>
     </div>
   )
