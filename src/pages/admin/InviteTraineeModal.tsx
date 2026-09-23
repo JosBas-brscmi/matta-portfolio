@@ -11,8 +11,7 @@ interface Props {
 // Default to a batch code that reflects the current year/month, e.g. MATTA-2026-01.
 function defaultBatchCode(): string {
   const now = new Date()
-  const month = String(now.getMonth() + 1).padStart(2, '0')
-  return `MATTA-${now.getFullYear()}-${month}`
+  return `MATTA-${now.getFullYear()}-01`
 }
 
 function todayISO(): string {
@@ -77,7 +76,7 @@ export default function InviteTraineeModal({ open, onClose, onSuccess }: Props) 
 
   const handleCopyCredentials = async () => {
     if (!successData) return
-    const signInUrl = window.location.origin + '/login'
+    const signInUrl = window.location.origin + '/matta/login'
     const text = `MATTA Portfolio account\n\nEmail: ${successData.email}\nTemporary password: ${successData.temp_password}\n\nSign in at: ${signInUrl}`
     try {
       await navigator.clipboard.writeText(text)
@@ -110,7 +109,7 @@ export default function InviteTraineeModal({ open, onClose, onSuccess }: Props) 
             </div>
             <div className="credential-row">
               <span className="credential-label">Sign-in URL</span>
-              <code>{window.location.origin + '/login'}</code>
+              <code>{window.location.origin + '/matta/login'}</code>
             </div>
           </div>
 
