@@ -32,6 +32,7 @@ import {
   type Review,
 } from '../../services/reviewService'
 import ReviewModal from './ReviewModal'
+import ResourcesCard from '../../components/ResourcesCard'
 import { useAuth } from '../../contexts/AuthContext'
 
 const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
@@ -505,6 +506,18 @@ const computedProgress = useMemo(() => {
             </div>
           )}
         </div>
+
+        <ResourcesCard
+          traineeId={trainee.id}
+          canUpload={
+            viewerProfile?.role === 'mentor' ||
+            viewerProfile?.role === 'manager' ||
+            viewerProfile?.role === 'ma_board' ||
+            viewerProfile?.role === 'ma_center' ||
+            viewerProfile?.role === 'owner'
+          }
+          currentUserId={viewerProfile?.id}
+        />
 
         {/* Assessments Card */}
         <div className="dashboard-card">
