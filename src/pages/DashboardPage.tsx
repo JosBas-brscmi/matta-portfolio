@@ -289,7 +289,7 @@ export default function DashboardPage() {
         <div className="dashboard-card">
           <div className="dashboard-card-header">
             <h2>Quick actions 快速操作</h2>
-            <span className="card-tag">v0.2</span>
+            <span className="card-tag">v1.1</span>
           </div>
 
           {isAdmin && (

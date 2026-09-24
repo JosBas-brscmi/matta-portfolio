@@ -89,7 +89,7 @@ export default function AdminShell() {
 
         <div className="admin-sidebar-footer">
           <span>© {new Date().getFullYear()} Browave</span>
-          <span>v0.2</span>
+          <span>v1.1</span>
         </div>
       </aside>
 
