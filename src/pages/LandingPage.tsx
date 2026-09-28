@@ -61,7 +61,7 @@ export default function LandingPage() {
 
       <footer className="landing-footer">
         <span>© {new Date().getFullYear()} Browave Corporation · MATTA Program</span>
-        <span>v0.4</span>
+        <span>v1.1</span>
       </footer>
     </div>
   )
