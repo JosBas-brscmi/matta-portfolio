@@ -57,6 +57,8 @@ export default function LandingPage() {
             </ul>
           </div>
         </aside>
+
+        
       </main>
 
       <footer className="landing-footer">
