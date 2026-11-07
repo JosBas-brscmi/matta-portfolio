@@ -202,6 +202,9 @@ export default function UsersPage() {
               {filtered.map((u) => {
                 const isSelf = u.id === me?.id
                 const busy = savingId === u.id
+                const protectedRole = ['owner', 'ma_center'].includes(u.role)
+                const canManageRole =
+                  myProfile?.role === 'owner' || !protectedRole
                 return (
                   <tr key={u.id} className={flashId === u.id ? 'row-flash' : ''}>
                     <td>
@@ -228,10 +231,15 @@ export default function UsersPage() {
                         className="users-select"
                         value={u.role}
                         onChange={(e) => handleRoleChange(u, e.target.value as UserRole)}
-                        disabled={busy || isSelf}
+                        disabled={busy || isSelf || !canManageRole}
                         title={isSelf ? 'You cannot change your own role' : 'Change role'}
                       >
-                        {ROLE_OPTIONS.map((r) => (
+                        {ROLE_OPTIONS.filter(
+                          (r) =>
+                            myProfile?.role === 'owner' ||
+                            !['owner', 'ma_center'].includes(r.value) ||
+                            r.value === u.role,
+                        ).map((r) => (
                           <option key={r.value} value={r.value}>
                             {r.label}
                           </option>

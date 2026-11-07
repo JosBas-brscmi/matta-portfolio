@@ -18,7 +18,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 $body = json_decode(file_get_contents('php://input'), true);
-if (!$body) {
+if (!is_array($body) || !$body) {
     http_response_code(400);
     echo json_encode(['error' => 'missing_body']);
     exit;
@@ -40,19 +40,44 @@ if (!$caller || !in_array($caller['role'], ['owner', 'ma_center'])) {
     exit;
 }
 
-$email = strtolower(trim($body['email'] ?? ''));
-$full_name = trim($body['full_name'] ?? '');
-$role = trim($body['role'] ?? '');
-$department = trim($body['department'] ?? '') ?: null;
+$email = $body['email'] ?? null;
+$full_name = $body['full_name'] ?? null;
+$role = $body['role'] ?? null;
+$department = $body['department'] ?? null;
+
+if (!is_string($email) || !is_string($full_name) || !is_string($role) ||
+    ($department !== null && !is_string($department))) {
+    http_response_code(400);
+    echo json_encode(['error' => 'invalid_fields']);
+    exit;
+}
+
+$email = strtolower(trim($email));
+$full_name = trim($full_name);
+$role = trim($role);
+$department = trim($department ?? '') ?: null;
 
 if (!$email || !$full_name || !$role) {
     http_response_code(400);
     echo json_encode(['error' => 'missing_fields']);
     exit;
 }
+if (
+    !in_array($role, ['mentor', 'manager', 'ma_board', 'ma_center'], true) ||
+    ($role === 'ma_center' && $caller['role'] !== 'owner')
+) {
+    http_response_code(400);
+    echo json_encode(['error' => 'invalid_role']);
+    exit;
+}
 if (!preg_match('/^[^\s@]+@browave\.com$/i', $email)) {
     http_response_code(400);
     echo json_encode(['error' => 'invalid_email']);
+    exit;
+}
+if (strlen($full_name) > 200 || ($department !== null && strlen($department) > 200)) {
+    http_response_code(400);
+    echo json_encode(['error' => 'invalid_fields']);
     exit;
 }
 

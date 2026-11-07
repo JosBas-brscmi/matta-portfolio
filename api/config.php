@@ -19,12 +19,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit;
 }
 
-// Local DB configuration — prefers environment variables, falls back to defaults.
+// Non-secret connection defaults; credentials must come from the server environment.
 $DB_HOST = getenv('DB_HOST') ?: '127.0.0.1';
 $DB_PORT = getenv('DB_PORT') ?: '5432';
 $DB_NAME = getenv('DB_NAME') ?: 'matta';
-$DB_USER = getenv('DB_USER') ?: 'matta';
-$DB_PASS = getenv('DB_PASS') ?: 'MaC2468';
+$DB_USER = getenv('DB_USER') ?: '';
+$DB_PASS = getenv('DB_PASS') ?: '';
 $DSN = "pgsql:host={$DB_HOST};port={$DB_PORT};dbname={$DB_NAME}";
 
 function get_db(): PDO
@@ -32,12 +32,19 @@ function get_db(): PDO
     static $pdo = null;
     global $DSN, $DB_USER, $DB_PASS;
     if ($pdo) return $pdo;
+    if ($DB_USER === '' || $DB_PASS === '') {
+        error_log('[api] Database credentials are not configured.');
+        http_response_code(500);
+        echo json_encode(['error' => 'database_unavailable']);
+        exit;
+    }
     try {
         $pdo = new PDO($DSN, $DB_USER, $DB_PASS, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
         $pdo->exec('CREATE SCHEMA IF NOT EXISTS public');
     } catch (PDOException $e) {
+        error_log('[api] Database connection failed: ' . $e->getMessage());
         http_response_code(500);
-        echo json_encode(['error' => 'DB connection failed', 'detail' => $e->getMessage()]);
+        echo json_encode(['error' => 'database_unavailable']);
         exit;
     }
     return $pdo;

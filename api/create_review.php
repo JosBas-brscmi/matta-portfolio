@@ -28,32 +28,101 @@ try {
         json_response(['error' => 'Not signed in', 'detail' => 'Session user_id missing'], 401);
     }
 
+    $callerStmt = $pdo->prepare(
+        'SELECT role, department FROM public.users_profile WHERE id = :id LIMIT 1'
+    );
+    $callerStmt->execute([':id' => $userId]);
+    $caller = $callerStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$caller || !in_array($caller['role'], [
+        'owner',
+        'ma_center',
+        'ma_board',
+        'manager',
+        'mentor',
+    ], true)) {
+        json_response(['error' => 'Forbidden'], 403);
+    }
+
     $rawInput = file_get_contents('php://input');
-    $data = json_decode($rawInput, true) ?? $_POST;
+    $decoded = json_decode($rawInput, true);
+    $data = is_array($decoded) ? $decoded : $_POST;
+    if (!is_array($data)) {
+        json_response(['error' => 'Invalid request body'], 400);
+    }
 
     $traineeId = $data['trainee_id'] ?? $data['traineeId'] ?? null;
-    $reviewerId = $data['reviewer_id'] ?? $data['reviewerId'] ?? $userId;
+    $reviewerId = $userId;
     $reviewType = $data['review_type'] ?? 'performance';
     
     // Convert YYYY-MM inputs (e.g. "2026-08") to a valid DATE format ("2026-08-01")
     $rawPeriod = $data['review_period'] ?? date('Y-m-01');
-    if (preg_match('/^\d{4}-\d{2}$/', $rawPeriod)) {
+    if ($rawPeriod !== null && !is_string($rawPeriod)) {
+        json_response(['error' => 'Invalid review period'], 400);
+    }
+    if ($rawPeriod === '') {
+        $reviewPeriod = null;
+    } elseif (preg_match('/^\d{4}-\d{2}$/', $rawPeriod)) {
         $reviewPeriod = $rawPeriod . '-01';
     } else {
         $reviewPeriod = $rawPeriod;
     }
+    if (
+        is_string($reviewPeriod) &&
+        (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $reviewPeriod) ||
+            !checkdate((int) substr($reviewPeriod, 5, 2), (int) substr($reviewPeriod, 8, 2), (int) substr($reviewPeriod, 0, 4)))
+    ) {
+        json_response(['error' => 'Invalid review period'], 400);
+    }
 
-    $rating = isset($data['rating']) && $data['rating'] !== '' ? (float)$data['rating'] : null;
-    $strengths = trim($data['strengths'] ?? $data['comments'] ?? $data['feedback'] ?? '');
-    $areasForImprovement = trim($data['areas_for_improvement'] ?? $data['areasForImprovement'] ?? '');
-    $recommendation = trim($data['recommendation'] ?? '');
-    $reviewedAt = $data['reviewed_at'] ?? $data['review_date'] ?? date('Y-m-d H:i:s');
+    $rawRating = $data['rating'] ?? null;
+    if ($rawRating !== null && $rawRating !== '' &&
+        (!is_numeric($rawRating) || (float) $rawRating < 1 || (float) $rawRating > 5)) {
+        json_response(['error' => 'Invalid rating'], 400);
+    }
+    $rating = $rawRating !== null && $rawRating !== '' ? (float) $rawRating : null;
+    $strengths = $data['strengths'] ?? $data['comments'] ?? $data['feedback'] ?? '';
+    $areasForImprovement = $data['areas_for_improvement'] ?? $data['areasForImprovement'] ?? '';
+    $recommendation = $data['recommendation'] ?? '';
+    if (
+        !is_string($reviewType) ||
+        !in_array($reviewType, ['performance', 'weekly_note', 'monthly_review', 'encouragement', 'manager_observation', 'other'], true) ||
+        !is_string($strengths) ||
+        !is_string($areasForImprovement) ||
+        !is_string($recommendation) ||
+        strlen($strengths) > 10000 ||
+        strlen($areasForImprovement) > 10000 ||
+        strlen($recommendation) > 10000
+    ) {
+        json_response(['error' => 'Invalid review fields'], 400);
+    }
+    $strengths = trim($strengths);
+    $areasForImprovement = trim($areasForImprovement);
+    $recommendation = trim($recommendation);
+    $reviewedAt = date('Y-m-d H:i:s');
 
-    if (!$traineeId) {
+    if (!is_string($traineeId) || $traineeId === '') {
         json_response([
             'error' => 'Missing parameters',
             'detail' => 'trainee_id is required.'
         ], 400);
+    }
+
+    $traineeStmt = $pdo->prepare("
+        SELECT t.mentor_id, t.department
+        FROM public.trainees t
+        WHERE t.id = :id
+        LIMIT 1
+    ");
+    $traineeStmt->execute([':id' => $traineeId]);
+    $trainee = $traineeStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$trainee) {
+        json_response(['error' => 'Trainee not found'], 404);
+    }
+    if (
+        ($caller['role'] === 'mentor' && $trainee['mentor_id'] !== $userId) ||
+        ($caller['role'] === 'manager' && $trainee['department'] !== $caller['department'])
+    ) {
+        json_response(['error' => 'Forbidden'], 403);
     }
 
     $id = generate_uuid();
@@ -114,14 +183,8 @@ try {
 
 } catch (PDOException $e) {
     error_log('[create_review PDO Error] ' . $e->getMessage());
-    json_response([
-        'error' => 'database_error',
-        'detail' => $e->getMessage()
-    ], 500);
+    json_response(['error' => 'database_error'], 500);
 } catch (Throwable $e) {
     error_log('[create_review General Error] ' . $e->getMessage());
-    json_response([
-        'error' => 'server_error',
-        'detail' => $e->getMessage()
-    ], 500);
+    json_response(['error' => 'server_error'], 500);
 }

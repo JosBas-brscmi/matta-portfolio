@@ -1,130 +1,138 @@
 <?php
-// update_review.php
 
-header('Content-Type: application/json');
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: POST, PUT, OPTIONS');
-header('Access-Control-Allow-Headers: Content-Type, Authorization');
+header('Content-Type: application/json; charset=utf-8');
+require_once __DIR__ . '/config.php';
+session_start();
 
-// Handle CORS preflight request
-if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(200);
-    exit();
+function respond(array $body, int $status = 200): never
+{
+    http_response_code($status);
+    echo json_encode($body);
+    exit;
 }
 
-// Ensure the request method is POST or PUT
-if (!in_array($_SERVER['REQUEST_METHOD'], ['POST', 'PUT'])) {
-    http_response_code(405);
-    echo json_encode([
-        'status' => 'error',
-        'message' => 'Method not allowed. Use POST or PUT.'
-    ]);
-    exit();
+if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+    respond(['error' => 'method_not_allowed'], 405);
 }
 
-// Database Credentials
-$db_host = 'localhost';
-$db_name = 'matta_db';
-$db_user = 'db_username';
-$db_pass = 'db_password';
+$userId = $_SESSION['user_id'] ?? null;
+if (!$userId) {
+    respond(['error' => 'unauthorized'], 401);
+}
+
+$data = json_decode(file_get_contents('php://input') ?: '', true);
+if (!is_array($data)) {
+    respond(['error' => 'invalid_json'], 400);
+}
+
+$reviewId = $data['id'] ?? null;
+$reviewType = $data['review_type'] ?? null;
+$period = $data['review_period'] ?? null;
+$rating = $data['rating'] ?? null;
+$strengths = $data['strengths'] ?? null;
+$improvements = $data['areas_for_improvement'] ?? null;
+$recommendation = $data['recommendation'] ?? null;
+
+if (
+    !is_string($reviewId) ||
+    $reviewId === '' ||
+    !is_string($reviewType) ||
+    !in_array($reviewType, [
+        'weekly_note',
+        'monthly_review',
+        'encouragement',
+        'manager_observation',
+        'other',
+    ], true)
+) {
+    respond(['error' => 'invalid_review'], 400);
+}
+
+if ($period !== null && !is_string($period)) {
+    respond(['error' => 'invalid_review_period'], 400);
+}
+if ($period === '') {
+    $period = null;
+}
+if (is_string($period) && preg_match('/^\d{4}-\d{2}$/', $period)) {
+    $period .= '-01';
+}
+if (
+    is_string($period) &&
+    (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $period) ||
+        !checkdate((int) substr($period, 5, 2), (int) substr($period, 8, 2), (int) substr($period, 0, 4)))
+) {
+    respond(['error' => 'invalid_review_period'], 400);
+}
+
+if (
+    $rating !== null &&
+    (!is_numeric($rating) || (float) $rating < 1 || (float) $rating > 5)
+) {
+    respond(['error' => 'invalid_rating'], 400);
+}
+
+foreach ([$strengths, $improvements, $recommendation] as $text) {
+    if ($text !== null && (!is_string($text) || strlen($text) > 10000)) {
+        respond(['error' => 'invalid_review_text'], 400);
+    }
+}
 
 try {
-    $pdo = new PDO("mysql:host={$db_host};dbname={$db_name};charset=utf8mb4", $db_user, $db_pass, [
-        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_EMULATE_PREPARES => false,
-    ]);
-} catch (PDOException $e) {
-    http_response_code(500);
-    echo json_encode([
-        'status' => 'error',
-        'message' => 'Database connection failed: ' . $e->getMessage()
-    ]);
-    exit();
-}
-
-// Retrieve and parse JSON payload with $_POST fallback
-$inputRaw = file_get_contents('php://input');
-$data = json_decode($inputRaw, true) ?? $_POST;
-
-// Input Validation
-$review_id = $data['id'] ?? null;
-
-if (!$review_id) {
-    http_response_code(400);
-    echo json_encode([
-        'status' => 'error',
-        'message' => 'Missing required parameter: id'
-    ]);
-    exit();
-}
-
-// Extract updated fields with default nulls if omitted
-$review_type = isset($data['review_type']) ? trim($data['review_type']) : null;
-$review_period = isset($data['review_period']) ? trim($data['review_period']) : null;
-$rating = isset($data['rating']) && is_numeric($data['rating']) ? (int)$data['rating'] : null;
-$strengths = isset($data['strengths']) ? trim($data['strengths']) : null;
-$areas_for_improvement = isset($data['areas_for_improvement']) ? trim($data['areas_for_improvement']) : null;
-$recommendation = isset($data['recommendation']) ? trim($data['recommendation']) : null;
-$mt_reply = isset($data['mt_reply']) ? trim($data['mt_reply']) : null;
-
-try {
-    // Check if the record exists first
-    $checkSql = "SELECT id FROM reviews WHERE id = :id";
-    $checkStmt = $pdo->prepare($checkSql);
-    $checkStmt->execute([':id' => $review_id]);
-
-    if (!$checkStmt->fetch()) {
-        http_response_code(404);
-        echo json_encode([
-            'status' => 'error',
-            'message' => 'Review entry not found.'
-        ]);
-        exit();
+    $pdo = get_db();
+    $callerStmt = $pdo->prepare(
+        'SELECT role FROM public.users_profile WHERE id = :id LIMIT 1'
+    );
+    $callerStmt->execute([':id' => $userId]);
+    $caller = $callerStmt->fetch(PDO::FETCH_ASSOC);
+    $allowedRoles = ['owner', 'ma_center', 'ma_board', 'manager', 'mentor'];
+    if (!$caller || !in_array($caller['role'], $allowedRoles, true)) {
+        respond(['error' => 'forbidden'], 403);
     }
 
-    // Execute dynamic update statement
-    $sql = "UPDATE reviews 
-            SET 
-                review_type = COALESCE(:review_type, review_type),
-                review_period = COALESCE(:review_period, review_period),
-                rating = COALESCE(:rating, rating),
-                strengths = COALESCE(:strengths, strengths),
-                areas_for_improvement = COALESCE(:areas_for_improvement, areas_for_improvement),
-                recommendation = COALESCE(:recommendation, recommendation),
-                mt_reply = COALESCE(:mt_reply, mt_reply),
-                updated_at = NOW()
-            WHERE id = :id";
+    $reviewStmt = $pdo->prepare(
+        'SELECT reviewer_id FROM public.reviews WHERE id = :id LIMIT 1'
+    );
+    $reviewStmt->execute([':id' => $reviewId]);
+    $review = $reviewStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$review) {
+        respond(['error' => 'review_not_found'], 404);
+    }
+    if (
+        $review['reviewer_id'] !== $userId &&
+        !in_array($caller['role'], ['owner', 'ma_center'], true)
+    ) {
+        respond(['error' => 'forbidden'], 403);
+    }
 
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([
-        ':review_type' => $review_type,
-        ':review_period' => $review_period,
+    $update = $pdo->prepare("
+        UPDATE public.reviews
+        SET review_type = :review_type,
+            review_period = :review_period,
+            rating = :rating,
+            strengths = :strengths,
+            areas_for_improvement = :areas_for_improvement,
+            recommendation = :recommendation,
+            updated_at = NOW()
+        WHERE id = :id
+        RETURNING *
+    ");
+    $update->execute([
+        ':review_type' => $reviewType,
+        ':review_period' => $period,
         ':rating' => $rating,
         ':strengths' => $strengths,
-        ':areas_for_improvement' => $areas_for_improvement,
+        ':areas_for_improvement' => $improvements,
         ':recommendation' => $recommendation,
-        ':mt_reply' => $mt_reply,
-        ':id' => $review_id,
+        ':id' => $reviewId,
     ]);
 
-    // Fetch updated record to return in response
-    $fetchSql = "SELECT * FROM reviews WHERE id = :id";
-    $fetchStmt = $pdo->prepare($fetchSql);
-    $fetchStmt->execute([':id' => $review_id]);
-    $updatedReview = $fetchStmt->fetch();
-
-    http_response_code(200);
-    echo json_encode([
+    respond([
         'status' => 'success',
-        'message' => 'Review updated successfully.',
-        'review' => $updatedReview
+        'message' => 'Review entry updated.',
+        'review' => $update->fetch(PDO::FETCH_ASSOC),
     ]);
-
-} catch (PDOException $e) {
-    http_response_code(500);
-    echo json_encode([
-        'status' => 'error',
-        'message' => 'Query failed: ' . $e->getMessage()
-    ]);
+} catch (Throwable $e) {
+    error_log('[update_review] ' . $e->getMessage());
+    respond(['error' => 'server_error'], 500);
 }

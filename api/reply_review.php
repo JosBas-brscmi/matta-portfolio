@@ -19,33 +19,67 @@ try {
     if (!$userId) {
         json_response(['error' => 'Not signed in', 'detail' => 'Session user_id missing'], 401);
     }
+    $profileStmt = $pdo->prepare(
+        'SELECT role FROM public.users_profile WHERE id = :id LIMIT 1'
+    );
+    $profileStmt->execute([':id' => $userId]);
+    $profile = $profileStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$profile || $profile['role'] !== 'mt') {
+        json_response(['error' => 'Forbidden'], 403);
+    }
 
     $rawInput = file_get_contents('php://input');
-    $data = json_decode($rawInput, true) ?? $_POST;
+    $decoded = json_decode($rawInput, true);
+    $data = is_array($decoded) ? $decoded : $_POST;
+    if (!is_array($data)) {
+        json_response(['error' => 'Invalid request body'], 400);
+    }
 
     $reviewId = $data['review_id'] ?? $data['reviewId'] ?? $data['id'] ?? null;
-    $reply = trim($data['reply'] ?? $data['mt_reply'] ?? $data['comment'] ?? '');
+    $reply = $data['reply'] ?? $data['mt_reply'] ?? $data['comment'] ?? '';
 
-    if (!$reviewId || $reply === '') {
+    if (!is_string($reviewId) || !is_string($reply) || $reviewId === '' || $reply === '' || strlen($reply) > 10000) {
         json_response([
             'error' => 'Missing parameters',
             'detail' => 'review_id and reply content are required.'
         ], 400);
     }
 
-    // Update the trainee reply (mt_reply) and reply timestamp (mt_reply_at)
+    $traineeStmt = $pdo->prepare("
+        SELECT id FROM public.trainees WHERE user_id = :user_id LIMIT 1
+    ");
+    $traineeStmt->execute([':user_id' => $userId]);
+    $trainee = $traineeStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$trainee) {
+        json_response(['error' => 'Forbidden'], 403);
+    }
+
+    $reviewExists = $pdo->prepare("
+        SELECT id FROM public.reviews
+        WHERE id = :review_id AND trainee_id = :trainee_id
+        LIMIT 1
+    ");
+    $reviewExists->execute([
+        ':review_id' => $reviewId,
+        ':trainee_id' => $trainee['id'],
+    ]);
+    if (!$reviewExists->fetch(PDO::FETCH_ASSOC)) {
+        json_response(['error' => 'Forbidden'], 403);
+    }
+
     $stmt = $pdo->prepare("
-        UPDATE reviews
+        UPDATE public.reviews
         SET 
             mt_reply = :reply,
             mt_reply_at = NOW(),
             updated_at = NOW()
-        WHERE id = :review_id
+        WHERE id = :review_id AND trainee_id = :trainee_id
     ");
 
     $stmt->execute([
-        ':reply'     => $reply,
+        ':reply' => trim($reply),
         ':review_id' => $reviewId,
+        ':trainee_id' => $trainee['id'],
     ]);
 
     if ($stmt->rowCount() === 0) {
@@ -76,12 +110,10 @@ try {
     error_log('[reply_review PDO Error] ' . $e->getMessage());
     json_response([
         'error' => 'database_error',
-        'detail' => $e->getMessage()
     ], 500);
 } catch (Throwable $e) {
     error_log('[reply_review General Error] ' . $e->getMessage());
     json_response([
         'error' => 'server_error',
-        'detail' => $e->getMessage()
     ], 500);
 }

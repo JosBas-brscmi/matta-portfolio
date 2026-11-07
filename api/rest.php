@@ -1,4 +1,3 @@
-
 <?php
 
 declare(strict_types=1);
@@ -16,38 +15,6 @@ require_once __DIR__ . '/config.php';
 $method = strtoupper($_SERVER['REQUEST_METHOD'] ?? 'GET');
 $table  = $_GET['table'] ?? null;
 
-$rawBody = file_get_contents('php://input');
-
-if ($rawBody === false) {
-    $rawBody = '';
-}
-
-/*
-|--------------------------------------------------------------------------
-| Debug request logging
-|--------------------------------------------------------------------------
-*/
-
-$raw = [
-    'time'    => date('c'),
-    'method'  => $method,
-    'get'     => $_GET,
-    'headers' => function_exists('getallheaders')
-        ? getallheaders()
-        : [],
-    'body'    => $rawBody,
-];
-
-@file_put_contents(
-    __DIR__ . '/last_request.log',
-    json_encode(
-        $raw,
-        JSON_UNESCAPED_UNICODE |
-        JSON_UNESCAPED_SLASHES
-    ) . PHP_EOL,
-    FILE_APPEND
-);
-
 /*
 |--------------------------------------------------------------------------
 | Validate table name
@@ -55,7 +22,8 @@ $raw = [
 */
 
 if (
-    !$table ||
+    !is_string($table) ||
+    $table === '' ||
     !preg_match('/^[a-zA-Z0-9_]+$/', $table)
 ) {
     http_response_code(400);
@@ -64,6 +32,12 @@ if (
         'error' => 'Missing or invalid table name',
     ]);
 
+    exit;
+}
+
+if (!in_array($table, ['users_profile', 'trainees'], true)) {
+    http_response_code(404);
+    echo json_encode(['error' => 'Table not available']);
     exit;
 }
 
@@ -344,7 +318,34 @@ function validate_select_string(
 
 try {
 
+    session_start();
+    $userId = $_SESSION['user_id'] ?? null;
+    if (!$userId) {
+        json_response(['error' => 'unauthorized'], 401);
+    }
+
     $pdo = get_db();
+    $callerStmt = $pdo->prepare(
+        'SELECT role FROM public.users_profile WHERE id = :id LIMIT 1'
+    );
+    $callerStmt->execute([':id' => $userId]);
+    $caller = $callerStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$caller) {
+        json_response(['error' => 'unauthorized'], 401);
+    }
+
+    $isAdmin = in_array($caller['role'], ['owner', 'ma_center'], true);
+    $isRead = $method === 'GET';
+    $isOwnTraineeCreate = $table === 'trainees' && $method === 'POST';
+    $isUpdate = $method === 'PUT';
+
+    if (
+        !$isRead &&
+        !$isOwnTraineeCreate &&
+        !$isUpdate
+    ) {
+        json_response(['error' => 'method_not_allowed'], 405);
+    }
 
     if (!table_exists($pdo, $table)) {
 
@@ -365,6 +366,9 @@ try {
 
         $select =
             $_GET['select'] ?? '*';
+        if (!is_string($select)) {
+            json_response(['error' => 'Invalid select parameter'], 400);
+        }
 
         /*
          * portfolio_items can request:
@@ -545,14 +549,16 @@ try {
         }
 
 
-        if (!empty($where)) {
+        if ($table === 'users_profile' && !$isAdmin) {
+            $where[] = '"id" = :auth_user_id';
+            $params[':auth_user_id'] = $userId;
+        } elseif ($table === 'trainees' && !$isAdmin) {
+            $where[] = '"user_id" = :auth_user_id';
+            $params[':auth_user_id'] = $userId;
+        }
 
-            $sql .=
-                ' WHERE ' .
-                implode(
-                    ' AND ',
-                    $where
-                );
+        if (!empty($where)) {
+            $sql .= ' WHERE ' . implode(' AND ', $where);
         }
 
 
@@ -763,6 +769,56 @@ try {
             ], 400);
         }
 
+        $allowedInsertFields = [
+            'employee_id',
+            'batch_code',
+            'education',
+            'onboard_date',
+        ];
+        if (
+            isset($body['user_id']) &&
+            $body['user_id'] !== $userId
+        ) {
+            json_response(['error' => 'forbidden'], 403);
+        }
+        unset($body['user_id']);
+        if (
+            $table !== 'trainees' ||
+            array_diff(array_keys($body), $allowedInsertFields) !== []
+        ) {
+            json_response(['error' => 'invalid_fields'], 400);
+        }
+        if ($caller['role'] !== 'mt') {
+            json_response(['error' => 'forbidden'], 403);
+        }
+        foreach (['employee_id', 'batch_code', 'onboard_date'] as $requiredField) {
+            if (!isset($body[$requiredField]) || !is_string($body[$requiredField]) || trim($body[$requiredField]) === '') {
+                json_response(['error' => 'invalid_fields'], 400);
+            }
+        }
+        if (
+            strlen($body['employee_id']) > 100 ||
+            strlen($body['batch_code']) > 100 ||
+            !preg_match('/^\d{4}-\d{2}-\d{2}$/', $body['onboard_date']) ||
+            !checkdate(
+                (int) substr($body['onboard_date'], 5, 2),
+                (int) substr($body['onboard_date'], 8, 2),
+                (int) substr($body['onboard_date'], 0, 4)
+            ) ||
+            (isset($body['education']) &&
+                $body['education'] !== null &&
+                (!is_string($body['education']) || strlen($body['education']) > 10000))
+        ) {
+            json_response(['error' => 'invalid_fields'], 400);
+        }
+        $existingTrainee = $pdo->prepare(
+            'SELECT 1 FROM public.trainees WHERE user_id = :user_id LIMIT 1'
+        );
+        $existingTrainee->execute([':user_id' => $userId]);
+        if ($existingTrainee->fetchColumn()) {
+            json_response(['error' => 'trainee_already_exists'], 409);
+        }
+        $body['user_id'] = $userId;
 
         $columns = [];
 
@@ -859,7 +915,7 @@ try {
         $id =
             $_GET['id'] ?? null;
 
-        if (!$id) {
+        if (!is_string($id) || $id === '') {
 
             json_response([
                 'error' =>
@@ -879,6 +935,111 @@ try {
             ], 400);
         }
 
+        $isOwnUserProfile = $table === 'users_profile' && !$isAdmin;
+        $allowedUpdateFields = $table === 'users_profile'
+            ? ($isAdmin
+                ? ['role', 'department', 'status']
+                : ['full_name', 'phone', 'bio', 'avatar_path'])
+            : ($isAdmin
+                ? ['mentor_id', 'department']
+                : ['education', 'profile_completeness']);
+        if (array_diff(array_keys($body), $allowedUpdateFields) !== []) {
+            json_response(['error' => 'invalid_fields'], 400);
+        }
+        if (
+            $table === 'users_profile' &&
+            array_key_exists('role', $body) &&
+            $caller['role'] === 'ma_center' &&
+            in_array($body['role'], ['owner', 'ma_center'], true)
+        ) {
+            json_response(['error' => 'forbidden'], 403);
+        }
+        if ($table === 'users_profile') {
+            if (
+                array_key_exists('role', $body) &&
+                (!is_string($body['role']) ||
+                    !in_array($body['role'], ['mt', 'mentor', 'manager', 'ma_center', 'ma_board', 'owner'], true))
+            ) {
+                json_response(['error' => 'invalid_role'], 400);
+            }
+            if (
+                array_key_exists('status', $body) &&
+                (!is_string($body['status']) || !in_array($body['status'], ['active', 'inactive'], true))
+            ) {
+                json_response(['error' => 'invalid_status'], 400);
+            }
+            if (
+                array_key_exists('department', $body) &&
+                $body['department'] !== null &&
+                (!is_string($body['department']) || strlen($body['department']) > 200)
+            ) {
+                json_response(['error' => 'invalid_department'], 400);
+            }
+            if (
+                array_key_exists('full_name', $body) &&
+                (!is_string($body['full_name']) || trim($body['full_name']) === '' || strlen($body['full_name']) > 200)
+            ) {
+                json_response(['error' => 'invalid_full_name'], 400);
+            }
+            if (
+                array_key_exists('role', $body) &&
+                $caller['role'] === 'ma_center'
+            ) {
+                $targetRoleStmt = $pdo->prepare(
+                    'SELECT role FROM public.users_profile WHERE id = :id LIMIT 1'
+                );
+                $targetRoleStmt->execute([':id' => $id]);
+                $targetRole = $targetRoleStmt->fetchColumn();
+                if (
+                    !$targetRole ||
+                    in_array($targetRole, ['owner', 'ma_center'], true) ||
+                    in_array($body['role'], ['owner', 'ma_center'], true)
+                ) {
+                    json_response(['error' => 'forbidden'], 403);
+                }
+            }
+            foreach (['phone' => 100, 'bio' => 10000, 'avatar_path' => 1000] as $field => $maxLength) {
+                if (
+                    array_key_exists($field, $body) &&
+                    $body[$field] !== null &&
+                    (!is_string($body[$field]) || strlen($body[$field]) > $maxLength)
+                ) {
+                    json_response(['error' => 'invalid_profile_field'], 400);
+                }
+            }
+        } elseif ($isAdmin) {
+            if (
+                array_key_exists('department', $body) &&
+                $body['department'] !== null &&
+                (!is_string($body['department']) || strlen($body['department']) > 200)
+            ) {
+                json_response(['error' => 'invalid_department'], 400);
+            }
+            if (
+                array_key_exists('mentor_id', $body) &&
+                $body['mentor_id'] !== null &&
+                (!is_string($body['mentor_id']) ||
+                    !preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $body['mentor_id']))
+            ) {
+                json_response(['error' => 'invalid_mentor_id'], 400);
+            }
+        } else {
+            if (
+                array_key_exists('education', $body) &&
+                $body['education'] !== null &&
+                (!is_string($body['education']) || strlen($body['education']) > 10000)
+            ) {
+                json_response(['error' => 'invalid_education'], 400);
+            }
+            if (
+                array_key_exists('profile_completeness', $body) &&
+                (!is_numeric($body['profile_completeness']) ||
+                    (float) $body['profile_completeness'] < 0 ||
+                    (float) $body['profile_completeness'] > 100)
+            ) {
+                json_response(['error' => 'invalid_profile_completeness'], 400);
+            }
+        }
 
         $set = [];
 
@@ -945,9 +1106,16 @@ try {
                 ', ',
                 $set
             ) .
-            ' WHERE "id" = :update_id
-              RETURNING *';
+            ' WHERE "id" = :update_id';
 
+        if ($isOwnUserProfile) {
+            $sql .= ' AND "id" = :auth_user_id';
+            $params[':auth_user_id'] = $userId;
+        } elseif ($table === 'trainees' && !$isAdmin) {
+            $sql .= ' AND "user_id" = :auth_user_id';
+            $params[':auth_user_id'] = $userId;
+        }
+        $sql .= ' RETURNING *';
 
         $stmt =
             $pdo->prepare($sql);
@@ -976,40 +1144,6 @@ try {
     |--------------------------------------------------------------------------
     */
 
-    if ($method === 'DELETE') {
-
-        $id =
-            $_GET['id'] ?? null;
-
-        if (!$id) {
-
-            json_response([
-                'error' =>
-                    'Missing id for delete',
-            ], 400);
-        }
-
-
-        $sql =
-            'DELETE FROM "public".' .
-            quote_identifier($table) .
-            ' WHERE "id" = :delete_id';
-
-
-        $stmt =
-            $pdo->prepare($sql);
-
-        $stmt->execute([
-            ':delete_id' => $id,
-        ]);
-
-
-        json_response([
-            'data' => null,
-        ]);
-    }
-
-
     /*
     |--------------------------------------------------------------------------
     | Unsupported HTTP method
@@ -1032,73 +1166,12 @@ try {
     |--------------------------------------------------------------------------
     */
 
-    $log =
-        '[' .
-        date('c') .
-        '] PDO_ERROR' .
-        PHP_EOL;
-
-    $log .=
-        'MESSAGE: ' .
-        $e->getMessage() .
-        PHP_EOL;
-
-    $log .=
-        'CODE: ' .
-        $e->getCode() .
-        PHP_EOL;
-
-    $log .=
-        'METHOD: ' .
-        $method .
-        PHP_EOL;
-
-    $log .=
-        'TABLE: ' .
-        $table .
-        PHP_EOL;
-
-    $log .=
-        'GET: ' .
-        json_encode($_GET) .
-        PHP_EOL;
-
-    $log .=
-        'BODY: ' .
-        $rawBody .
-        PHP_EOL;
-
-    $log .=
-        'TRACE: ' .
-        $e->getTraceAsString() .
-        PHP_EOL;
-
-    $log .=
-        str_repeat(
-            '-',
-            80
-        ) .
-        PHP_EOL;
-
-
-    @file_put_contents(
-        __DIR__ . '/error.log',
-        $log,
-        FILE_APPEND
-    );
-
+    error_log('[rest] Database request failed: ' . $e->getMessage());
 
     http_response_code(500);
 
     echo json_encode([
-        'error' =>
-            'query_failed',
-
-        'detail' =>
-            $e->getMessage(),
-
-        'table' =>
-            $table,
+        'error' => 'query_failed',
     ]);
 
     exit;
@@ -1112,70 +1185,13 @@ try {
     |--------------------------------------------------------------------------
     */
 
-    $log =
-        '[' .
-        date('c') .
-        '] GENERAL_ERROR' .
-        PHP_EOL;
-
-    $log .=
-        'MESSAGE: ' .
-        $e->getMessage() .
-        PHP_EOL;
-
-    $log .=
-        'METHOD: ' .
-        $method .
-        PHP_EOL;
-
-    $log .=
-        'TABLE: ' .
-        $table .
-        PHP_EOL;
-
-    $log .=
-        'GET: ' .
-        json_encode($_GET) .
-        PHP_EOL;
-
-    $log .=
-        'BODY: ' .
-        $rawBody .
-        PHP_EOL;
-
-    $log .=
-        'TRACE: ' .
-        $e->getTraceAsString() .
-        PHP_EOL;
-
-    $log .=
-        str_repeat(
-            '-',
-            80
-        ) .
-        PHP_EOL;
-
-
-    @file_put_contents(
-        __DIR__ . '/error.log',
-        $log,
-        FILE_APPEND
-    );
-
+    error_log('[rest] Request failed: ' . $e->getMessage());
 
     http_response_code(500);
 
     echo json_encode([
-        'error' =>
-            'query_failed',
-
-        'detail' =>
-            $e->getMessage(),
-
-        'table' =>
-            $table,
+        'error' => 'request_failed',
     ]);
 
     exit;
 }
-

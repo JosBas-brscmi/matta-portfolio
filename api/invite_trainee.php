@@ -18,7 +18,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 $body = json_decode(file_get_contents('php://input'), true);
-if (!$body) {
+if (!is_array($body) || !$body) {
     http_response_code(400);
     echo json_encode(['error' => 'missing_body']);
     exit;
@@ -40,12 +40,32 @@ if (!$caller || !in_array($caller['role'], ['owner', 'ma_center'])) {
     exit;
 }
 
-$email = strtolower(trim($body['email'] ?? ''));
-$full_name = trim($body['full_name'] ?? '');
-$employee_id = trim($body['employee_id'] ?? '');
-$batch_code = trim($body['batch_code'] ?? '');
-$onboard_date = trim($body['onboard_date'] ?? '');
-$department = trim($body['department'] ?? '') ?: null;
+$email = $body['email'] ?? null;
+$full_name = $body['full_name'] ?? null;
+$employee_id = $body['employee_id'] ?? null;
+$batch_code = $body['batch_code'] ?? null;
+$onboard_date = $body['onboard_date'] ?? null;
+$department = $body['department'] ?? null;
+
+if (
+    !is_string($email) ||
+    !is_string($full_name) ||
+    !is_string($employee_id) ||
+    !is_string($batch_code) ||
+    !is_string($onboard_date) ||
+    ($department !== null && !is_string($department))
+) {
+    http_response_code(400);
+    echo json_encode(['error' => 'invalid_fields']);
+    exit;
+}
+
+$email = strtolower(trim($email));
+$full_name = trim($full_name);
+$employee_id = trim($employee_id);
+$batch_code = trim($batch_code);
+$onboard_date = trim($onboard_date);
+$department = trim($department ?? '') ?: null;
 
 if (!$email || !$full_name || !$employee_id || !$batch_code || !$onboard_date) {
     http_response_code(400);
@@ -55,6 +75,23 @@ if (!$email || !$full_name || !$employee_id || !$batch_code || !$onboard_date) {
 if (!preg_match('/^[^\s@]+@[^\s@]+\.[^\s@]+$/', $email)) {
     http_response_code(400);
     echo json_encode(['error' => 'invalid_email']);
+    exit;
+}
+if (
+    strlen($email) > 254 ||
+    strlen($full_name) > 200 ||
+    strlen($employee_id) > 100 ||
+    strlen($batch_code) > 100 ||
+    ($department !== null && strlen($department) > 200) ||
+    !preg_match('/^\d{4}-\d{2}-\d{2}$/', $onboard_date) ||
+    !checkdate(
+        (int) substr($onboard_date, 5, 2),
+        (int) substr($onboard_date, 8, 2),
+        (int) substr($onboard_date, 0, 4)
+    )
+) {
+    http_response_code(400);
+    echo json_encode(['error' => 'invalid_fields']);
     exit;
 }
 

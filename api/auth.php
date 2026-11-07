@@ -11,7 +11,8 @@ $pdo->exec("CREATE TABLE IF NOT EXISTS public.local_auth (
   password_hash text NOT NULL
 )");
 
-$inputBody = json_decode(file_get_contents('php://input'), true) ?? [];
+$decodedBody = json_decode(file_get_contents('php://input'), true);
+$inputBody = is_array($decodedBody) ? $decodedBody : [];
 $action = $_GET['action'] ?? ($_POST['action'] ?? ($inputBody['action'] ?? null));
 
 function json($v)
@@ -23,12 +24,26 @@ function json($v)
 try {
     if ($action === 'signup' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $body = $inputBody;
-        $email = strtolower(trim($body['email'] ?? ''));
+        $email = $body['email'] ?? null;
         $password = $body['password'] ?? '';
-        $full_name = trim($body['full_name'] ?? '');
-        if (!$email || !$password || !$full_name) {
+        $full_name = $body['full_name'] ?? null;
+        if (is_string($email)) {
+            $email = strtolower(trim($email));
+        }
+        if (is_string($full_name)) {
+            $full_name = trim($full_name);
+        }
+        if (
+            !is_string($email) ||
+            !filter_var($email, FILTER_VALIDATE_EMAIL) ||
+            !is_string($password) ||
+            strlen($password) < 8 ||
+            !is_string($full_name) ||
+            $full_name === '' ||
+            strlen($full_name) > 200
+        ) {
             http_response_code(400);
-            json(['error' => 'missing_fields']);
+            json(['error' => 'invalid_signup_fields']);
         }
 
         // check existing
@@ -51,6 +66,7 @@ try {
         $up->execute([':user_id' => $id, ':pwd' => $pwdHash]);
 
         // set session
+        session_regenerate_id(true);
         $_SESSION['user_id'] = $id;
         $userObj = ['id' => $id, 'email' => $email, 'full_name' => $full_name];
         // Return a Supabase-like shape: { data: { user, session } }
@@ -59,12 +75,13 @@ try {
 
     if ($action === 'signin' && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $body = $inputBody;
-        $email = strtolower(trim($body['email'] ?? ''));
+        $email = $body['email'] ?? null;
         $password = $body['password'] ?? '';
-        if (!$email || !$password) {
+        if (!is_string($email) || !is_string($password) || $email === '' || $password === '') {
             http_response_code(400);
             json(['error' => 'missing_fields']);
         }
+        $email = strtolower(trim($email));
 
         $stmt = $pdo->prepare('SELECT p.id, p.email, p.full_name, a.password_hash FROM public.users_profile p JOIN public.local_auth a ON a.user_id = p.id WHERE p.email = :email');
         $stmt->execute([':email' => $email]);
@@ -74,6 +91,7 @@ try {
             json(['error' => 'invalid_credentials']);
         }
 
+        session_regenerate_id(true);
         $_SESSION['user_id'] = $row['id'];
         unset($row['password_hash']);
         $userObj = ['id' => $row['id'], 'email' => $row['email'], 'full_name' => $row['full_name']];
@@ -106,7 +124,7 @@ try {
         $body = $inputBody;
         $password = $body['password'] ?? ($body['new_password'] ?? '');
 
-        if (!$password || strlen($password) < 8) {
+        if (!is_string($password) || strlen($password) < 8) {
             http_response_code(400);
             json(['error' => 'password_too_short', 'message' => 'Password must be at least 8 characters.']);
         }
@@ -129,6 +147,7 @@ try {
     http_response_code(400);
     json(['error' => 'unknown_action']);
 } catch (Exception $e) {
+    error_log('[auth] Request failed: ' . $e->getMessage());
     http_response_code(500);
-    json(['error' => 'server_error', 'detail' => $e->getMessage()]);
+    json(['error' => 'server_error']);
 }

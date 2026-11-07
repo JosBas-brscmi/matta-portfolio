@@ -24,3 +24,10 @@ jobs:
 
       - name: Build the project
         run: npm run build
+
+      - name: Verify production build has no source maps
+        run: |
+          if find dist -type f -name '*.map' -print -quit | grep -q .; then
+            echo "Production source maps must not be published."
+            exit 1
+          fi
